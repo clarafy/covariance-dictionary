@@ -1,9 +1,103 @@
+""" Covariance dictionary learning
+"""
 
 import warnings
 from numpy import (arange, cov, diag, diag_indices, dot, empty, fmax, 
-	identity, logical_or, max, sqrt, where, triu_indices, vstack, zeros)
+	identity, logical_or, max, mod, sqrt, where, triu_indices, vstack, zeros)
 from numpy.linalg import norm
 from scipy.linalg import eigh
+
+def proj_psd(A):
+
+	# Projects a symmetric matrix to nearest
+	# positive semi-definite matrix.
+
+	# TODO: Check for symmetry? Should never need to.
+
+	d, U = eigh(A, lower=False)
+	U = U[:, d > 0]
+	d = d[d > 0]
+	Aproj = dot(dot(U, diag(d)), U.T)
+
+	return Aproj
+
+def proj_corr(A):
+
+	# TODO: If ends up being useful, add max_iter and tol parameters.
+
+	# Projects a symmetric matrix to the nearest correlation
+	# matrix (PSD matrix with equality constraints on
+	# the diagonal and bound constraints on the off-diagonal)
+	# using Dykstra's algorithm, as described in Higham (2002)
+	# "Computing the nearest correlation matrix: A problem from finance".
+
+	# How exactly is Dykstra's different from ADMM for two projections?
+
+	n = A.shape[0]
+	deltaS = zeros((n, n))
+	Y = A
+	X = zeros((n, n)) 
+
+	triu_idx = triu_indices(n)
+	diag_idx = diag_indices(n) 
+
+	for n_iter in range(1, 101):
+
+		Xprev = X
+		Yprev = Y
+
+		R = Y - deltaS
+
+		# Project onto semidefinite cone.
+		X = proj_psd(R)
+
+		deltaS = X - R
+		Y = X
+
+		# Equality and bound constraints. 
+		Y[diag_idx] = 1
+		Y[Y > 1] = 1
+		Y[Y < -1] = -1
+
+		diffX = max(abs(X - Xprev)) / max(abs(X))
+		diffY = max(abs(Y - Yprev)) / max(abs(Y))
+		diffXY = max(abs(Y - X)) / max(abs(Y))
+
+		if max([diffX, diffY, diffXY]) < 1e-6:
+			break
+
+	return Y
+
+
+
+def proj_col_psd(A, correlation=False):
+
+	# Projects every column of a matrix to the upper-triangle
+	# of the nearest positive semi-definite or correlation matrix.
+
+	n_pair, n_col = A.shape
+	n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
+
+	Aproj = empty((n_pair, n_col))
+	cov_triu = empty((n, n))
+	triu_idx = triu_indices(n)
+
+	if correlation:
+		for mod_idx in range(n_col):
+
+			# Reconstruct symmetric matrix (only need half).
+			cov_triu[triu_idx] = A[:, mod_idx]
+			Aproj[:, mod_idx] = proj_corr(cov_triu)[triu_idx]
+	else:
+		for mod_idx in range(n_col):
+
+			# Reconstruct symmetric matrix (only need half).
+			cov_triu[triu_idx] = A[:, mod_idx]
+			Aproj[:, mod_idx] = proj_psd(cov_triu)[triu_idx]
+
+	return Aproj
+
+
 
 class CovarianceDictionary(object):
 
@@ -34,106 +128,12 @@ class CovarianceDictionary(object):
 		self.admm_gamma = admm_gamma
 		self.admm_alpha = admm_alpha
 
-	def _proj_psd(A):
-
-		# Projects a symmetric matrix to nearest
-		# positive semi-definite matrix.
-
-		# TODO: Check for symmetry? Should never need to.
-
-		d, U = eigh(A, lower=False)
-		U = U[:, d > 0]
-		d = d[d > 0]
-		Aproj = dot(dot(U, diag(d)), U.T)
-
-		return Aproj
 
 
-
-	def _proj_corr(A):
-
-		# TODO: If ends up being useful, add max_iter and tol parameters.
-
-		# Projects a symmetric matrix to the nearest correlation
-		# matrix (PSD matrix with equality constraints on
-		# the diagonal and bound constraints on the off-diagonal)
-		# using Dykstra's algorithm, as described in Higham (2002)
-		# "Computing the nearest correlation matrix: A problem from finance".
-
-		# How exactly is Dykstra's different from ADMM for two projections?
-
-		n = A.shape[0]
-		deltaS = zeros((n, n))
-		Y = A
-		X = zeros((n, n)) 
-
-		triu_idx = triu_indices(n)
-		diag_idx = diag_indices(n) 
-
-		for n_iter in range(1, 101):
-
-			Xprev = X
-			Yprev = Y
-
-			R = Y - deltaS
-
-			# Project onto semidefinite cone.
-			X = proj_psd(R)
-
-			deltaS = X - R
-			Y = X
-
-			# Equality and bound constraints. 
-			Y[diag_idx] = 1
-			Y[Y > 1] = 1
-			Y[Y < -1] = -1
-
-			diffX = npmax(abs(X - Xprev)) / npmax(abs(X))
-			diffY = npmax(abs(Y - Yprev)) / npmax(abs(Y))
-			diffXY = npmax(abs(Y - X)) / npmax(abs(Y))
-
-			if max([diffX, diffY, diffXY]) < 1e-6:
-				break
-
-		return Y
-
-
-
-	def _proj_col_psd(A, correlation):
-
-		# Projects every column of a matrix to the upper-triangle
-		# of the nearest positive semi-definite or correlation matrix.
-
-		n_pair, k = A.shape
-		n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
-
-		Aproj = empty((n_pair, n_samp))
-		cov_triu = empty((n, n))
-		triu_idx = triu_indices(n)
-
-		if correlation:
-			for mod_idx in range(n_samp):
-
-				# Reconstruct symmetric matrix (only need half).
-				cov_triu[triu_idx] = A[:, mod_idx]
-				Aproj[:, mod_idx] = _proj_corr(cov_triu)[triu_idx]
-		else:
-			for mod_idx in range(n_samp):
-
-				# Reconstruct symmetric matrix (only need half).
-				cov_triu[triu_idx] = A[:, mod_idx]
-				Aproj[:, mod_idx] = _proj_psd(cov_triu)[triu_idx]
-
-		return Aproj
-
-		
-
-	return Mproj, n_iter
-
-	def _initialize(X, n_components):
+	def _initialize(self, X):
 
 		# Initializes the modules M and weights W randomly or using k-means,
-		# à la Wild, Curry, & Dougherty (2004) "Improving non-negative 
+		# as in Wild, Curry, & Dougherty (2004) "Improving non-negative 
 		# matrix factorizations through structured initialization".
 
 		from sklearn.cluster import KMeans
@@ -145,19 +145,19 @@ class CovarianceDictionary(object):
 
 			Xnorm = X / norm(X, axis=0)
 
-			km = KMeans(n_clusters=n_components).fit(Xnorm.T)
+			km = KMeans(n_clusters=self.n_components).fit(Xnorm.T)
 			centroids = km.cluster_centers_.T
 			Minit = proj_col_psd(centroids)
 
 			labels = km.predict(Xnorm.T)
-			Winit = zeros((k, n_samp))
-			Winit[labels, arange(n_mat)] = 1
+			Winit = zeros((self.n_components, n_samp))
+			Winit[labels, arange(n_samp)] = 1
 
 		elif self.init == 'rand':
 
 			# Initialize modules to random linear combinations
 			# of input covariances.
-			Minit = dot(X, rand(n_samp, n_components))
+			Minit = dot(X, rand(n_samp, self.n_components))
 			Winit, _, _ = _nls_subproblem(X, Minit, rand(k, n_samp))
 
 		return Minit, Winit
@@ -188,16 +188,16 @@ class CovarianceDictionary(object):
 
 		n_pair, n_samp = X.shape
 		n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
-		max_dim = max([n_pair, n_mat])
+		max_dim = max([n_pair, n_samp])
 
 		M = Minit
 		W = Winit
 		V = Winit
 		Lambda = zeros((n_pair, k))
-		Pi = zeros((k, n_mat))
+		Pi = zeros((k, n_samp))
 
 		normX = norm(X)
-		objective = empty(max_iter + 1)
+		objective = empty(self.max_iter + 1)
 		objective[0] = finfo('d').max
 
 		for n_iter in range(1, self.max_iter + 1):
@@ -221,7 +221,7 @@ class CovarianceDictionary(object):
 			obj = norm(X - dot(M, W)) / normX
 			obj_prev = objective[n_iter - 1]
 
-			if abs(obj - obj_prev) / fmax(1, obj_prev) < self.tol or obj < self.tol
+			if abs(obj - obj_prev) / fmax(1, obj_prev) < self.tol or obj < self.tol:
 				objective[n_iter] = obj
 				break
 
@@ -309,81 +309,81 @@ class CovarianceDictionary(object):
 
 	def _psdls_subproblem(self, X, Minit, W):
 
-	# Update modules by solving column-wise positive-semidefinite (PSD)
-	# constrained least-squares using projected gradient descent:
+		# Update modules by solving column-wise positive-semidefinite (PSD)
+		# constrained least-squares using projected gradient descent:
 
-	# minimize ||X - M * W||_F
-	# subject to the constraint that every column of M
-	# corresponds to the upper triangle of a PSD matrix.
+		# minimize ||X - M * W||_F
+		# subject to the constraint that every column of M
+		# corresponds to the upper triangle of a PSD matrix.
 
-	n_pair, n_mat = X.shape
-	n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
+		n_pair, n_samp = X.shape
+		n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
 
-	M = Minit
-	WWt = dot(W, W.T)
-	XWt = dot(X, W.T)
-	pg_norm = empty(max_iter)
-	# in_iter = empty(max_iter)
-	
-	alpha = 1
+		M = Minit
+		WWt = dot(W, W.T)
+		XWt = dot(X, W.T)
+		pg_norm = empty(self.max_iter)
+		# in_iter = empty(self.max_iter)
+		
+		alpha = 1
 
-	for n_iter in range(1, self.psdls_max_iter + 1):
+		for n_iter in range(1, self.psdls_max_iter + 1):
 
-		gradM = dot(M, WWt) - XWt
+			gradM = dot(M, WWt) - XWt
 
-		# Stopping condition on projected gradient norm.
-		pg_norm[n_iter - 1] = norm(proj_colpsd(M - gradM, n) - M)
-		if pg_norm[n_iter - 1] < tol:
-			break
-
-		Mold = M
-
-		# Search for step size that produces sufficient decrease
-		# ("Armijo rule along the projection arc" in Bertsekas (1999), using shortcut
-		# condition in Lin (2007) Eq. (17).)
-		for inner_iter in range(20):
-
-			# Gradient and projection steps.
-			Mnew = proj_colpsd(M - alpha * gradM, n)
-
-			d = Mnew - M
-			gradd = dot(gradM.ravel(), d.ravel())
-			dQd = dot(dot(d, WWt).ravel(), d.ravel())
-			suff_decr = 0.99 * gradd + 0.5 * dQd < 0
-
-			# 1.1 If initially not sufficient decrease, then...
-			# 2.1 If initially sufficient decrease, then...
-			if inner_iter == 0:
-				decr_alpha = not suff_decr
-
-			if decr_alpha:
-				# 1.3 ...there is sufficient decrease.
-				if suff_decr:
-					M = Mnew
-					break
-				# 1.2 ...decrease alpha until...
-				else:
-					alpha *= self.psdls_beta
-
-			# 2.3 ...there is not sufficient decrease.
-			elif not suff_decr or (Mold == Mnew).all():
-				M = Mold
+			# Stopping condition on projected gradient norm.
+			pg_norm[n_iter - 1] = norm(proj_col_psd(M - gradM, n) - M)
+			if pg_norm[n_iter - 1] < self.tol:
 				break
 
-			# 2.2 ...increase alpha until...
-			else:
-				alpha /= self.psdls_beta
-				Mold = Mnew
+			Mold = M
 
-		# in_iter[n_iter - 1] = inner_iter
+			# Search for step size that produces sufficient decrease
+			# ("Armijo rule along the projection arc" in Bertsekas (1999), using shortcut
+			# condition in Lin (2007) Eq. (17).)
+			for inner_iter in range(20):
 
-	if n_iter == self.psdls_max_iter:
-		warnings.warn("Max iterations reached in SDLS subproblem.")
+				# Gradient and projection steps.
+				Mnew = proj_col_psd(M - alpha * gradM, n)
 
-	# pg_norm = pg_norm[: n_iter]
-	# in_iter = in_iter[: n_iter]
+				d = Mnew - M
+				gradd = dot(gradM.ravel(), d.ravel())
+				dQd = dot(dot(d, WWt).ravel(), d.ravel())
+				suff_decr = 0.99 * gradd + 0.5 * dQd < 0
 
-	return M, gradM, n_iter
+				# 1.1 If initially not sufficient decrease, then...
+				# 2.1 If initially sufficient decrease, then...
+				if inner_iter == 0:
+					decr_alpha = not suff_decr
+
+				if decr_alpha:
+					# 1.3 ...there is sufficient decrease.
+					if suff_decr:
+						M = Mnew
+						break
+					# 1.2 ...decrease alpha until...
+					else:
+						alpha *= self.psdls_beta
+
+				# 2.3 ...there is not sufficient decrease.
+				elif not suff_decr or (Mold == Mnew).all():
+					M = Mold
+					break
+
+				# 2.2 ...increase alpha until...
+				else:
+					alpha /= self.psdls_beta
+					Mold = Mnew
+
+			# in_iter[n_iter - 1] = inner_iter
+
+		if n_iter == self.psdls_max_iter:
+			warnings.warn("Max iterations reached in SDLS subproblem.")
+
+		# pg_norm = pg_norm[: n_iter]
+		# in_iter = in_iter[: n_iter]
+
+		return M, gradM, n_iter
 
 
 	def _als(self, X, Minit, Winit):
@@ -409,19 +409,19 @@ class CovarianceDictionary(object):
 		tolW = tolM
 
 		normX = norm(X)
-		objective = empty(max_iter)
-		# pg_norm = empty(max_iter)
+		objective = empty(self.max_iter)
+		# pg_norm = empty(self.max_iter)
 
-		for n_iter in range(1, max_iter + 1):
+		for n_iter in range(1, self.max_iter + 1):
 
 			# Stopping criterion, based on Calamai & More (1987) Lemma 3.1(c)
 			# (stationary point iff projected gradient norm = 0).
 			pgradW = gradW * logical_or(gradW < 0, W > 0)
-			pgradM = proj_colpsd(M - gradM, n) - M
+			pgradM = proj_col_psd(M - gradM, n) - M
 			pgn = norm(vstack((pgradM, pgradW.T)))
 			# pg_norm[n_iter - 1] = pgn
 
-			if pgn < conv_tol * init_grad_norm:
+			if pgn < self.tol * init_grad_norm:
 				break
 
 			if mod(n_iter, 10) == 0:
@@ -432,12 +432,12 @@ class CovarianceDictionary(object):
 			objective[n_iter - 1] = obj
 
 			# Update modules.
-			M, gradM, iterM = _psdls_subproblem(X, M, W)
+			M, gradM, iterM = self._psdls_subproblem(X, M, W)
 			if iterM == 1:
 				tolM = 0.1 * tolM
 
 			# Update weights.
-			W, gradW, iterW = _nls_subproblem(X, M, W)
+			W, gradW, iterW = self._nls_subproblem(X, M, W)
 			if iterW == 1:
 				tolH = 0.1 * tolW
 
@@ -454,7 +454,7 @@ class CovarianceDictionary(object):
 		
 		"""Learns a covariance dictionary from data X and returns dictionary weights."""
 
-		Minit, Winit = _initialize(X, self.n_components)
+		Minit, Winit = self._initialize(X)
 
 		if self.method == 'als':
 			M, W, obj = self._als(X, Minit, Winit)
