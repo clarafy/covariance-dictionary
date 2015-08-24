@@ -3,9 +3,10 @@ Class for learning dictionary of covariances matrices
 """
 
 import warnings
-from numpy import (arange, cov, diag, diag_indices, dot, empty, fmax, 
+import sys
+from numpy import (arange, cov, diag, diag_indices, dot, empty, finfo, fmax, 
 	identity, logical_or, max, mod, sqrt, where, triu_indices, vstack, zeros)
-from numpy.linalg import norm
+from numpy.linalg import inv, norm
 from scipy.linalg import eigh
 
 def proj_psd(A):
@@ -73,28 +74,30 @@ def proj_corr(A):
 
 def proj_col_psd(A, correlation=False):
 
+	from numpy import isinf, isnan
+
 	# Projects every column of a matrix to the upper-triangle
 	# of the nearest positive semi-definite or correlation matrix.
 
 	n_pair, n_col = A.shape
-	n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
+	n = npair2n(n_pair)
 
-	Aproj = empty((n_pair, n_col))
-	cov_triu = empty((n, n))
+	Aproj = zeros((n_pair, n_col))
+	mat_triu = zeros((n, n))
 	triu_idx = triu_indices(n)
 
 	if correlation:
-		for mod_idx in range(n_col):
+		for col_idx in range(n_col):
 
 			# Reconstruct symmetric matrix (only need half).
-			cov_triu[triu_idx] = A[:, mod_idx]
-			Aproj[:, mod_idx] = proj_corr(cov_triu)[triu_idx]
+			mat_triu[triu_idx] = A[:, col_idx]
+			Aproj[:, col_idx] = proj_corr(mat_triu)[triu_idx]
 	else:
-		for mod_idx in range(n_col):
+		for col_idx in range(n_col):
 
 			# Reconstruct symmetric matrix (only need half).
-			cov_triu[triu_idx] = A[:, mod_idx]
-			Aproj[:, mod_idx] = proj_psd(cov_triu)[triu_idx]
+			mat_triu[triu_idx] = A[:, col_idx]
+			Aproj[:, col_idx] = proj_psd(mat_triu)[triu_idx]
 
 	return Aproj
 
@@ -128,8 +131,8 @@ class CovarianceDictionary(object):
 		"Improving non-negative matrix factorizations through structured initialization",
 		and 'rand' initializes to random linear combinations of input.
 
-	max_iter : int, optional, default = 200
-		Maximum number of iterations
+	max_iter : int, optional, default = None
+		Maximum number of iterations. If None, 200 for ALS and 2000 for ADMM
 
 	tol : double, optional, default = 1e-6
 		Stopping tolerance on projected gradient norm for ALS and objective for ADMM
@@ -175,9 +178,9 @@ class CovarianceDictionary(object):
 
 	"""
 
-	def __init__(self, k=2, method='als', init='kmeans', max_iter=200, 
-		tol=1e-6, verbose=False, nls_max_iter=2000, psdls_max_iter=2000, 
-		nls_beta=0.9, psdls_beta=0.9, correlation=False, admm_gamma=1.6, admm_alpha=1e-5):
+	def __init__(self, k=2, method='als', init='kmeans', max_iter=None, tol=1e-6, 
+		verbose=False, nls_max_iter=2000, psdls_max_iter=2000, 
+		nls_beta=0.2, psdls_beta=0.2, correlation=False, admm_gamma=0.05, admm_alpha=1e-6):
 		
 		if init not in ('kmeans', 'rand'):
 			raise ValueError(
@@ -191,8 +194,15 @@ class CovarianceDictionary(object):
                 (method, ('als', 'admm')))
 		self.method = method
 
+		if max_iter == None:
+			if self.method == 'als':
+				self.max_iter = 200
+			elif self.method == 'admm':
+				self.max_iter = 6000
+		else:
+			self.max_iter = max_iter
+
 		self.k = k
-		self.max_iter = max_iter
 		self.tol = tol
 		self.nls_max_iter = nls_max_iter
 		self.psdls_max_iter = psdls_max_iter
@@ -201,12 +211,15 @@ class CovarianceDictionary(object):
 		self.correlation = correlation
 		self.admm_gamma = admm_gamma
 		self.admm_alpha = admm_alpha
+		self.verbose = verbose
 		self.dictionary = None
 		self.objective = None
 
 
 
 	def _initialize(self, X):
+
+		from numpy import isinf
 
 		# Initializes the modules M and weights W randomly or using k-means,
 		# as in Wild, Curry, & Dougherty (2004) "Improving non-negative 
@@ -272,29 +285,36 @@ class CovarianceDictionary(object):
 		M = Minit
 		W = Winit
 		V = Winit
-		Lambda = zeros((n_pair, k))
-		Pi = zeros((k, n_samp))
+		Lambda = zeros((n_pair, self.k))
+		Pi = zeros((self.k, n_samp))
 
 		normX = norm(X)
 		objective = empty(self.max_iter)
 		obj_prev = finfo('d').max
 
-		for n_iter in range(1, self.max_iter + 1):
+		for n_iter in range(self.max_iter):
 
 			obj = norm(X - dot(M, W)) / normX
-			objective[n_iter - 1] = obj
+			objective[n_iter] = obj
 
 			# Stopping condition on objective.
-			if abs(obj - obj_prev) / fmax(1, obj_prev) < self.tol or obj < self.tol:
+			if (abs(obj - obj_prev) / fmax(1, obj_prev) < self.tol or
+					obj < self.tol or
+					obj > obj_prev):
 				break
 
 			obj_prev = obj
 
-			alpha = self.admm_alpha * normX * max_dim / n_iter
+			if self.verbose:
+				if mod(n_iter, 500) == 0:
+					print 'Iterations: %i. Objective: %f.' % (n_iter, obj)
+					sys.stdout.flush()
+
+			alpha = self.admm_alpha * normX * max_dim / (n_iter + 1)
 			beta = alpha * n_samp / n_pair
 
-			U = dot(dot(X, V.T) + alpha * M - Lambda, inv(dot(V, V.T) + alpha * identity(k)))
-			V = dot(inv(dot(U.T, U) + beta * identity(k)), dot(U.T, X) + beta * W - Pi)
+			U = dot(dot(X, V.T) + alpha * M - Lambda, inv(dot(V, V.T) + alpha * identity(self.k)))
+			V = dot(inv(dot(U.T, U) + beta * identity(self.k)), dot(U.T, X) + beta * W - Pi)
 
 			if self.correlation:
 				M, _ = proj_col_corr(U + Lambda / alpha)
@@ -303,11 +323,8 @@ class CovarianceDictionary(object):
 			
 			W = fmax(V + Pi / beta, 0)
 
-			Lambda = Lambda + gamma * alpha * (U - M)
-			Pi = Pi + gamma * beta * (V - W)
-
-			if mod(n_iter, 10) == 0:
-				print 'Objective: %f.' % obj
+			Lambda = Lambda + self.admm_gamma * alpha * (U - M)
+			Pi = Pi + self.admm_gamma * beta * (V - W)
 
 		objective = objective[: n_iter]
 
@@ -315,7 +332,7 @@ class CovarianceDictionary(object):
 
 
 
-	def _nls_subproblem(self, X, M, Winit):
+	def _nls_subproblem(self, X, M, Winit, tol):
 
 		# Update weights by solving non-negative least-squares
 		# using projected gradient descent (basically a transposed 
@@ -330,7 +347,7 @@ class CovarianceDictionary(object):
 
 		alpha = 1
 
-		for n_iter in range(1, self.nls_max_iter + 1):
+		for n_iter in range(self.nls_max_iter):
 
 			grad = dot(MtM, W) - MtX
 
@@ -338,9 +355,9 @@ class CovarianceDictionary(object):
 			# Multiplication with a boolean array is more than twice
 			# as fast as indexing into grad.
 			pgn = norm(grad * logical_or(grad < 0, W > 0))
-			pg_norm[n_iter - 1] = pgn
+			pg_norm[n_iter] = pgn
 
-			if pgn < self.tol:
+			if pgn < tol:
 				break
 
 			Wold = W
@@ -386,18 +403,18 @@ class CovarianceDictionary(object):
 					alpha /= self.nls_beta
 					Wold = Wnew
 
-			# in_iter[n_iter - 1] = inner_iter
+			# in_iter[n_iter] = inner_iter
 
 		if n_iter == self.nls_max_iter:
 			warnings.warn("Max iterations reached in NLS subproblem.")
 
-		pg_norm = pg_norm[: n_iter]
-		# in_iter = in_iter[: n_iter - 1]
+		pg_norm = pg_norm[: n_iter + 1]
+		# in_iter = in_iter[: n_iter]
 
 		return W, grad, n_iter 
 		
 
-	def _psdls_subproblem(self, X, Minit, W):
+	def _psdls_subproblem(self, X, Minit, W, tol):
 
 		# Update modules by solving column-wise positive-semidefinite (PSD)
 		# constrained least-squares using projected gradient descent:
@@ -407,25 +424,25 @@ class CovarianceDictionary(object):
 		# corresponds to the upper triangle of a PSD matrix.
 
 		n_pair, n_samp = X.shape
-		n = int((sqrt(1 + 8 * n_pair) - 1) / 2)
+		n = npair2n(n_pair)
 
 		M = Minit
 		WWt = dot(W, W.T)
 		XWt = dot(X, W.T)
 		pg_norm = empty(self.psdls_max_iter)
-		# in_iter = empty(self.max_iter)
+		# in_iter = empty(self.psdls_max_iter)
 		
 		alpha = 1
 
-		for n_iter in range(1, self.psdls_max_iter + 1):
+		for n_iter in range(self.psdls_max_iter):
 
 			gradM = dot(M, WWt) - XWt
 
 			# Stopping condition on projected gradient norm.
-			pgn = norm(proj_col_psd(M - gradM, n) - M)
-			pg_norm[n_iter - 1] = pgn
+			pgn = norm(proj_col_psd(M - gradM) - M)
+			pg_norm[n_iter] = pgn
 
-			if pgn < self.tol:
+			if pgn < tol:
 				break
 
 			Mold = M
@@ -436,7 +453,7 @@ class CovarianceDictionary(object):
 			for inner_iter in range(20):
 
 				# Gradient and projection steps.
-				Mnew = proj_col_psd(M - alpha * gradM, n)
+				Mnew = proj_col_psd(M - alpha * gradM)
 
 				d = Mnew - M
 				gradd = dot(gradM.ravel(), d.ravel())
@@ -467,13 +484,13 @@ class CovarianceDictionary(object):
 					alpha /= self.psdls_beta
 					Mold = Mnew
 
-			# in_iter[n_iter - 1] = inner_iter
+			# in_iter[n_iter] = inner_iter
 
 		if n_iter == self.psdls_max_iter:
 			warnings.warn("Max iterations reached in SDLS subproblem.")
 
-		pg_norm = pg_norm[: n_iter]
-		# in_iter = in_iter[: n_iter - 1]
+		pg_norm = pg_norm[: n_iter + 1]
+		# in_iter = in_iter[: n_iter]
 
 		return M, gradM, n_iter 
 
@@ -494,7 +511,10 @@ class CovarianceDictionary(object):
 		gradM = dot(M, dot(W, W.T)) - dot(X, W.T)
 		gradW = dot(dot(M.T, M), W) - dot(M.T, X)
 		init_grad_norm = norm(vstack((gradM, gradW.T)))
-		print "Initial gradient norm: %f." % init_grad_norm
+		
+		if self.verbose:
+			print "Initial gradient norm: %f." % init_grad_norm
+			sys.stdout.flush()
 
 		# Stopping tolerances for constrained ALS subproblems.
 		tolM = self.tol * init_grad_norm
@@ -504,39 +524,43 @@ class CovarianceDictionary(object):
 		objective = empty(self.max_iter)
 		# pg_norm = empty(self.max_iter)
 
-		for n_iter in range(1, self.max_iter + 1):
+		for n_iter in range(self.max_iter):
 
 			# Stopping criterion, based on Calamai & More (1987) Lemma 3.1(c)
 			# (stationary point iff projected gradient norm = 0).
 			pgradW = gradW * logical_or(gradW < 0, W > 0)
-			pgradM = proj_col_psd(M - gradM, n) - M
+			pgradM = proj_col_psd(M - gradM) - M
 			pgn = norm(vstack((pgradM, pgradW.T)))
-			# pg_norm[n_iter - 1] = pgn
+			# pg_norm[n_iter] = pgn
 
 			# Record objective.
 			obj = norm(X - dot(M, W)) / normX
-			objective[n_iter - 1] = obj
+			objective[n_iter] = obj
 
 			if pgn < self.tol * init_grad_norm:
 				break
 
-			if mod(n_iter, 10) == 0:
-				print 'Iterations: %i. Projected gradient norm: %f.' % (n_iter, pgn)
+			if self.verbose:
+				if mod(n_iter, 10) == 0:
+					print 'Iterations: %i. Projected gradient norm: %f.' % (n_iter, pgn)
+					sys.stdout.flush()
 
 			# Update modules.
-			M, gradM, iterM = self._psdls_subproblem(X, M, W)
-			if iterM == 1:
+			M, gradM, iterM = self._psdls_subproblem(X, M, W, tolM)
+			if iterM == 0:
 				tolM = 0.1 * tolM
 
 			# Update weights.
-			W, gradW, iterW = self._nls_subproblem(X, M, W)
-			if iterW == 1:
+			W, gradW, iterW = self._nls_subproblem(X, M, W, tolW)
+			if iterW == 0:
 				tolH = 0.1 * tolW
 
-		print 'Iterations: %i. Final projected gradient norm: %f.' % (n_iter, pgn)
+		if self.verbose:
+			print 'Iterations: %i. Final projected gradient norm: %f.' % (n_iter, pgn)
+			sys.stdout.flush()
 
-		objective = objective[: n_iter]
-		# pg_norm = pg_norm[: n_iter]
+		objective = objective[: n_iter + 1]
+		# pg_norm = pg_norm[: n_iter + 1]
 
 		return M, W, objective
 
