@@ -25,7 +25,7 @@ def proj_psd(A):
 
 	return Aproj
 
-def proj_corr(A):
+def proj_corr(A, max_iter=100, tol=1e-6):
 
 	# TODO: If ends up being useful, add max_iter and tol parameters.
 
@@ -45,7 +45,7 @@ def proj_corr(A):
 	triu_idx = triu_indices(n)
 	diag_idx = diag_indices(n) 
 
-	for n_iter in range(1, 101):
+	for n_iter in range(max_iter):
 
 		Xprev = X
 		Yprev = Y
@@ -67,8 +67,11 @@ def proj_corr(A):
 		diffY = max(abs(Y - Yprev)) / max(abs(Y))
 		diffXY = max(abs(Y - X)) / max(abs(Y))
 
-		if max([diffX, diffY, diffXY]) < 1e-6:
+		if max([diffX, diffY, diffXY]) < tol:
 			break
+
+	if n_iter == max_iter - 1:
+			warnings.warn("Max iterations reached in correlation matrix projection.")
 
 	return Y
 
@@ -145,20 +148,26 @@ class CovarianceDictionary(object):
 		Maximum number of iterations for the positive semidefinite least-squares
 		subproblem in ALS
 
-	nls_beta : double, optional, default = 0.2
+	nls_beta : double >= 0 and <= 1, optional, default = 0.2
 		Step size search parameter for the non-negative least-squares subproblem
 		in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999)
+		Larger values mean larger jumps in searching for step size, so
+		can speed up convergence but may be less accurate
 
-	psdls_beta : double, optional, default = 0.2
+	psdls_beta : double >= 0 and <= 1, optional, default = 0.2
 		Step size search parameter for the positive-semidefinite least-squares subproblem
-		in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999)
+		in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999).
+		Larger values mean larger jumps in searching for step size, so
+		can speed up convergence but may be less accurate. Empirically
+		larger psdls_beta affects accuracy more so than nls_beta
 
 	correlation : boolean, optional, default = False
 		Whether to find dictionary of correlation matrices rather
-		than covariance matrices. Currently only supported for ADMM and takes long as chickens
+		than covariance matrices. Supported for both ALS and ADMM,
+		but takes long as chickens for ALS so only use ADMM
 
 	admm_gamma : double, optional, default = 0.05
-		Step size for ADMM
+		Constant on step size rule for ADMM 
 
 	admm_alpha : double, optional, default = 1e-6
 		Scaling constant on penalty on proximal term ||U - D||_F^2 for ADMM
@@ -167,16 +176,19 @@ class CovarianceDictionary(object):
 		Whether to print algorithm progress (projected gradient norm for
 		ALS, objective for ADMM)
 
+	time : boolean, optional, default = False 
+		Whether to time each iteration
+
 	obj_tol : double, optional, default = None
 		Stopping condition on raw objective value. If None, stopping rule is 
 		instead based on objective decrease for ADMM and projected gradient norm for ALS.
-		Should only be used when true minimum objective value is known.
+		Should only be used when true minimum objective value is known
 
 	Attributes
 	----------
 	dictionary: array, [n_pair, k]
-		Dictionary of covariance matrices where each column gives the upper triangle
-		of a dictionary element
+		Dictionary of covariance or correlation matrices where each column 
+		gives the upper triangle of a dictionary element
 
 	objective: array, [n_iter]
 		Value of objective ||X - DW||_F / ||X||_F at each iteration
@@ -431,7 +443,7 @@ class CovarianceDictionary(object):
 
 			# in_iter[n_iter] = inner_iter
 
-		if n_iter == self.nls_max_iter:
+		if n_iter == self.nls_max_iter - 1:
 			warnings.warn("Max iterations reached in NLS subproblem.")
 
 		pg_norm = pg_norm[: n_iter + 1]
@@ -512,7 +524,7 @@ class CovarianceDictionary(object):
 
 			# in_iter[n_iter] = inner_iter
 
-		if n_iter == self.psdls_max_iter:
+		if n_iter == self.psdls_max_iter - 1:
 			warnings.warn("Max iterations reached in PSDLS subproblem.")
 
 		pg_norm = pg_norm[: n_iter + 1]
