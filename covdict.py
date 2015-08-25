@@ -74,7 +74,7 @@ def proj_corr(A):
 
 
 
-def proj_col_psd(A, correlation=False):
+def proj_col_psd(A, correlation):
 
 	# Projects every column of a matrix to the upper-triangle
 	# of the nearest positive semi-definite or correlation matrix.
@@ -184,8 +184,9 @@ class CovarianceDictionary(object):
 	"""
 
 	def __init__(self, k=2, method='als', init='kmeans', max_iter=None, tol=1e-5, 
-		verbose=False, obj_tol=None, time=False, nls_max_iter=2000, psdls_max_iter=2000, 
-		nls_beta=0.2, psdls_beta=0.2, correlation=False, admm_gamma=0.05, admm_alpha=1e-6):
+		verbose=False, obj_tol=None, time=False, 
+		nls_beta=0.2, psdls_beta=0.2, nls_max_iter=2000, psdls_max_iter=2000,
+		correlation=False, admm_gamma=0.05, admm_alpha=1e-6):
 		
 		if init not in ('kmeans', 'rand'):
 			raise ValueError(
@@ -241,7 +242,7 @@ class CovarianceDictionary(object):
 
 			km = KMeans(n_clusters=self.k).fit(Xnorm.T)
 			centroids = km.cluster_centers_.T
-			Dinit = proj_col_psd(centroids)
+			Dinit = proj_col_psd(centroids, self.correlation)
 
 			labels = km.predict(Xnorm.T)
 			Winit = zeros((self.k, n_samp))
@@ -306,6 +307,7 @@ class CovarianceDictionary(object):
 
 		for n_iter in range(self.max_iter):
 
+			# Record objective.
 			obj = norm(X - dot(D, W)) / normX
 			objective[n_iter] = obj
 
@@ -328,19 +330,18 @@ class CovarianceDictionary(object):
 					print 'Iter: %i. Objective: %f.' % (n_iter, obj)
 					sys.stdout.flush()
 
+			# Step size rule.
 			alpha = self.admm_alpha * normX * max_dim / (n_iter + 1)
 			beta = alpha * n_samp / n_pair
 
+			# Primal variable updates.
 			U = dot(dot(X, V.T) + alpha * D - Lambda, inv(dot(V, V.T) + alpha * identity(self.k)))
 			V = dot(inv(dot(U.T, U) + beta * identity(self.k)), dot(U.T, X) + beta * W - Pi)
 
-			if self.correlation:
-				D = proj_col_psd(U + Lambda / alpha, correlation=True)
-			else:
-				D = proj_col_psd(U + Lambda / alpha)
-			
+			D = proj_col_psd(U + Lambda / alpha, self.correlation)
 			W = fmax(V + Pi / beta, 0)
 
+			# Dual variable updates.
 			Lambda = Lambda + self.admm_gamma * alpha * (U - D)
 			Pi = Pi + self.admm_gamma * beta * (V - W)
 
@@ -349,8 +350,9 @@ class CovarianceDictionary(object):
 			print 'Iter: %i. Objective: %f.' % (n_iter, obj)
 			sys.stdout.flush()
 
-		objective = objective[: n_iter]
-		times = times[: n_iter]
+		objective = objective[: n_iter + 1]
+		if self.time:
+			times = times[: n_iter + 1]
 
 		return D, W, objective, times
 
@@ -463,7 +465,7 @@ class CovarianceDictionary(object):
 			gradD = dot(D, WWt) - XWt
 
 			# Stopping condition on projected gradient norm.
-			pgn = norm(proj_col_psd(D - gradD) - D)
+			pgn = norm(proj_col_psd(D - gradD, self.correlation) - D)
 			pg_norm[n_iter] = pgn
 
 			if pgn < tol:
@@ -477,7 +479,7 @@ class CovarianceDictionary(object):
 			for inner_iter in range(20):
 
 				# Gradient and projection steps.
-				Dnew = proj_col_psd(D - alpha * gradD)
+				Dnew = proj_col_psd(D - alpha * gradD, self.correlation)
 
 				d = Dnew - D
 				gradd = dot(gradD.ravel(), d.ravel())
@@ -559,7 +561,7 @@ class CovarianceDictionary(object):
 			# Stopping criterion, based on Calamai & More (1987) Lemma 3.1(c)
 			# (stationary point iff projected gradient norm = 0).
 			pgradW = gradW * logical_or(gradW < 0, W > 0)
-			pgradD = proj_col_psd(D - gradD) - D
+			pgradD = proj_col_psd(D - gradD, self.correlation) - D
 			pgn = norm(vstack((pgradD, pgradW.T)))
 			# pg_norm[n_iter] = pgn
 
@@ -597,8 +599,10 @@ class CovarianceDictionary(object):
 			sys.stdout.flush()
 
 		objective = objective[: n_iter + 1]
-		times = times[: n_iter + 1]
 		# pg_norm = pg_norm[: n_iter + 1]
+
+		if self.time:
+			times = times[: n_iter + 1]
 
 		return D, W, objective, times
 
@@ -611,12 +615,13 @@ class CovarianceDictionary(object):
 		Dinit, Winit = self._initialize(X)
 
 		if self.method == 'als':
-			D, W, obj = self._als(X, Dinit, Winit)
+			D, W, obj, times = self._als(X, Dinit, Winit)
 		elif self.method == 'admm':
-			D, W, obj = self._admm(X, Dinit, Winit)
+			D, W, obj, times = self._admm(X, Dinit, Winit)
 
 		self.dictionary = D
 		self.objective = obj
+		self.times = times
 
 
 		return W
