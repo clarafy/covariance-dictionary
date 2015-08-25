@@ -11,6 +11,20 @@ from numpy.linalg import inv, norm
 from numpy.random import rand
 from scipy.linalg import eigh
 
+def reform(a, n):
+
+	# Reforms a vector into the upper triangle
+	# of a symmetric matrix.
+	
+	template = zeros((n, n))
+	template[triu_indices(n)] = a
+	symm = template + template.T
+	symm[diag_indices(n)] = template[diag_indices(n)]
+
+	return symm 
+
+
+
 def proj_psd(A):
 
 	# Projects a symmetric matrix to nearest
@@ -338,7 +352,7 @@ class CovarianceDictionary(object):
 			obj_prev = obj
 
 			if self.verbose:
-				if mod(n_iter, 500) == 0:
+				if mod(n_iter, 100) == 0:
 					print 'Iter: %i. Objective: %f.' % (n_iter, obj)
 					sys.stdout.flush()
 
@@ -592,9 +606,8 @@ class CovarianceDictionary(object):
 				break
 
 			if self.verbose:
-				if mod(n_iter, 10) == 0:
-					print 'Iter: %i. Projected gradient norm: %f. Objective: %f.' % (n_iter, pgn, obj)
-					sys.stdout.flush()
+				print 'Iter: %i. Projected gradient norm: %f. Objective: %f.' % (n_iter, pgn, obj)
+				sys.stdout.flush()
 
 			# Update modules.
 			D, gradD, iterD = self._psdls_subproblem(X, D, W, tolD)
