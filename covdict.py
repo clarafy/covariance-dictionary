@@ -4,9 +4,11 @@ Class for learning dictionary of covariances matrices
 
 import warnings
 import sys
+import time
 from numpy import (arange, cov, diag, diag_indices, dot, empty, finfo, fmax, 
 	identity, logical_or, max, mod, sqrt, where, triu_indices, vstack, zeros)
 from numpy.linalg import inv, norm
+from numpy.random import rand
 from scipy.linalg import eigh
 
 def proj_psd(A):
@@ -148,22 +150,27 @@ class CovarianceDictionary(object):
 		in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999)
 
 	psdls_beta : double, optional, default = 0.2
-		Step size search parameter for the non-negative least-squares subproblem
+		Step size search parameter for the positive-semidefinite least-squares subproblem
 		in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999)
 
 	correlation : boolean, optional, default = False
 		Whether to find dictionary of correlation matrices rather
-		than covariance matrices. Currently only supported for ADMM, and takes eons
+		than covariance matrices. Currently only supported for ADMM and takes long as chickens
 
 	admm_gamma : double, optional, default = 0.05
 		Step size for ADMM
 
 	admm_alpha : double, optional, default = 1e-6
-		Scaling constant on penalty on proximal term ||U - M||_F^2 for ADMM
+		Scaling constant on penalty on proximal term ||U - D||_F^2 for ADMM
 
 	verbose : boolean, optional, default = False
 		Whether to print algorithm progress (projected gradient norm for
-		ALS, objective for ADMM) 
+		ALS, objective for ADMM)
+
+	obj_tol : double, optional, default = None
+		Stopping condition on raw objective value. If None, stopping rule is 
+		instead based on objective decrease for ADMM and projected gradient norm for ALS.
+		Should only be used when true minimum objective value is known.
 
 	Attributes
 	----------
@@ -172,12 +179,12 @@ class CovarianceDictionary(object):
 		of a dictionary element
 
 	objective: array, [n_iter]
-		Value of objective ||X - MW||_F / ||X||_F at each iteration
+		Value of objective ||X - DW||_F / ||X||_F at each iteration
 
 	"""
 
-	def __init__(self, k=2, method='als', init='kmeans', max_iter=None, tol=1e-6, 
-		verbose=False, nls_max_iter=2000, psdls_max_iter=2000, 
+	def __init__(self, k=2, method='als', init='kmeans', max_iter=None, tol=1e-5, 
+		verbose=False, obj_tol=None, time=False, nls_max_iter=2000, psdls_max_iter=2000, 
 		nls_beta=0.2, psdls_beta=0.2, correlation=False, admm_gamma=0.05, admm_alpha=1e-6):
 		
 		if init not in ('kmeans', 'rand'):
@@ -210,6 +217,8 @@ class CovarianceDictionary(object):
 		self.admm_gamma = admm_gamma
 		self.admm_alpha = admm_alpha
 		self.verbose = verbose
+		self.obj_tol = obj_tol
+		self.time = time
 		self.dictionary = None
 		self.objective = None
 
@@ -217,7 +226,7 @@ class CovarianceDictionary(object):
 
 	def _initialize(self, X):
 
-		# Initializes the modules M and weights W randomly or using k-means,
+		# Initializes the dictionary D and weights W randomly or using k-means,
 		# as in Wild, Curry, & Dougherty (2004) "Improving non-negative 
 		# matrix factorizations through structured initialization".
 
@@ -232,44 +241,45 @@ class CovarianceDictionary(object):
 
 			km = KMeans(n_clusters=self.k).fit(Xnorm.T)
 			centroids = km.cluster_centers_.T
-			Minit = proj_col_psd(centroids)
+			Dinit = proj_col_psd(centroids)
 
 			labels = km.predict(Xnorm.T)
 			Winit = zeros((self.k, n_samp))
 			Winit[labels, arange(n_samp)] = 1
 
+
 		elif self.init == 'rand':
 
 			# Initialize modules to random linear combinations
 			# of input covariances.
-			Minit = dot(X, rand(n_samp, self.k))
-			Winit, _, _ = _nls_subproblem(X, Minit, rand(k, n_samp))
+			Dinit = dot(X, rand(n_samp, self.k))
+			Winit, _, _ = self._nls_subproblem(X, Dinit, rand(self.k, n_samp), 1e-3)
 
-		return Minit, Winit
+		return Dinit, Winit
 
 
 
-	def _admm(self, X, Minit, Winit):
+	def _admm(self, X, Dinit, Winit):
 
 		# Solves for covariance module and weights using ADMM. Reformulate
 		# original optimization problem
 
-		# minimize ||X - MW||_F
+		# minimize ||X - DW||_F
 		# subject to
-		# each column of M is a PSD matrix
+		# each column of D is a PSD matrix
 		# each element of W is non-negative
 
 		# as
 
-		# minimize ||X - MW||_F
+		# minimize ||X - DW||_F
 		# subject to
-		# M = U
+		# D = U
 		# W = V
 		# each column of U is a PSD matrix
 		# each element of V is non-negative
 
 		# and sequentially minimize the augmented Lagrangian
-		# w.r.t U, V, M, and W.
+		# w.r.t U, V, D, and W.
 
 		# Can also solve problem under constraint of correlation
 		# matrices rather than general PSD matrices.
@@ -278,7 +288,7 @@ class CovarianceDictionary(object):
 		n = npair2n(n_pair)
 		max_dim = max([n_pair, n_samp])
 
-		M = Minit
+		D = Dinit
 		W = Winit
 		V = Winit
 		Lambda = zeros((n_pair, self.k))
@@ -288,55 +298,73 @@ class CovarianceDictionary(object):
 		objective = empty(self.max_iter)
 		obj_prev = finfo('d').max
 
+		if self.time:
+			times = empty(self.max_iter)
+			t = time.time()
+		else:
+			times = None
+
 		for n_iter in range(self.max_iter):
 
-			obj = norm(X - dot(M, W)) / normX
+			obj = norm(X - dot(D, W)) / normX
 			objective[n_iter] = obj
 
-			# Stopping condition on objective.
-			if (abs(obj - obj_prev) / fmax(1, obj_prev) < self.tol or
-					obj < self.tol or
-					obj > obj_prev):
+			if self.time:
+				times[n_iter] = time.time() - t
+
+			# Stopping condition.
+			if self.obj_tol == None:
+				if (abs(obj - obj_prev) / fmax(1, obj_prev) < self.tol or
+						obj < self.tol or
+						obj > obj_prev):
+					break
+			elif obj < self.obj_tol:
 				break
 
 			obj_prev = obj
 
 			if self.verbose:
 				if mod(n_iter, 500) == 0:
-					print 'Iterations: %i. Objective: %f.' % (n_iter, obj)
+					print 'Iter: %i. Objective: %f.' % (n_iter, obj)
 					sys.stdout.flush()
 
 			alpha = self.admm_alpha * normX * max_dim / (n_iter + 1)
 			beta = alpha * n_samp / n_pair
 
-			U = dot(dot(X, V.T) + alpha * M - Lambda, inv(dot(V, V.T) + alpha * identity(self.k)))
+			U = dot(dot(X, V.T) + alpha * D - Lambda, inv(dot(V, V.T) + alpha * identity(self.k)))
 			V = dot(inv(dot(U.T, U) + beta * identity(self.k)), dot(U.T, X) + beta * W - Pi)
 
 			if self.correlation:
-				M, _ = proj_col_corr(U + Lambda / alpha)
+				D = proj_col_psd(U + Lambda / alpha, correlation=True)
 			else:
-				M = proj_col_psd(U + Lambda / alpha)
+				D = proj_col_psd(U + Lambda / alpha)
 			
 			W = fmax(V + Pi / beta, 0)
 
-			Lambda = Lambda + self.admm_gamma * alpha * (U - M)
+			Lambda = Lambda + self.admm_gamma * alpha * (U - D)
 			Pi = Pi + self.admm_gamma * beta * (V - W)
 
+
+		if self.verbose:
+			print 'Iter: %i. Objective: %f.' % (n_iter, obj)
+			sys.stdout.flush()
+
 		objective = objective[: n_iter]
+		times = times[: n_iter]
 
-		return M, W, objective
+		return D, W, objective, times
 
 
 
-	def _nls_subproblem(self, X, M, Winit, tol):
+	def _nls_subproblem(self, X, D, Winit, tol):
 
 		# Update weights by solving non-negative least-squares
 		# using projected gradient descent (basically a transposed 
 		# version of scikit-learn's NMF _nls_subproblem method).
 
 		W = Winit
-		MtX = dot(M.T, X)
-		MtM = dot(M.T, M)
+		DtX = dot(D.T, X)
+		DtD = dot(D.T, D)
 
 		pg_norm = empty(self.nls_max_iter)
 		# in_iter = empty(self.max_iter)
@@ -345,7 +373,7 @@ class CovarianceDictionary(object):
 
 		for n_iter in range(self.nls_max_iter):
 
-			grad = dot(MtM, W) - MtX
+			grad = dot(DtD, W) - DtX
 
 			# Stopping condition on projected gradient norm.
 			# Multiplication with a boolean array is more than twice
@@ -372,7 +400,7 @@ class CovarianceDictionary(object):
 				# Check Lin (2007) Eq. (17) condition.
 				d = Wnew - W
 				gradd = dot(grad.ravel(), d.ravel())
-				dQd = dot(dot(MtM, d).ravel(), d.ravel())
+				dQd = dot(dot(DtD, d).ravel(), d.ravel())
 				suff_decr = 0.99 * gradd + 0.5 * dQd < 0
 
 				# 1.1 If initially not sufficient decrease, then...
@@ -410,19 +438,19 @@ class CovarianceDictionary(object):
 		return W, grad, n_iter 
 		
 
-	def _psdls_subproblem(self, X, Minit, W, tol):
+	def _psdls_subproblem(self, X, Dinit, W, tol):
 
 		# Update modules by solving column-wise positive-semidefinite (PSD)
 		# constrained least-squares using projected gradient descent:
 
-		# minimize ||X - M * W||_F
-		# subject to the constraint that every column of M
+		# minimize ||X - D * W||_F
+		# subject to the constraint that every column of D
 		# corresponds to the upper triangle of a PSD matrix.
 
 		n_pair, n_samp = X.shape
 		n = npair2n(n_pair)
 
-		M = Minit
+		D = Dinit
 		WWt = dot(W, W.T)
 		XWt = dot(X, W.T)
 		pg_norm = empty(self.psdls_max_iter)
@@ -432,16 +460,16 @@ class CovarianceDictionary(object):
 
 		for n_iter in range(self.psdls_max_iter):
 
-			gradM = dot(M, WWt) - XWt
+			gradD = dot(D, WWt) - XWt
 
 			# Stopping condition on projected gradient norm.
-			pgn = norm(proj_col_psd(M - gradM) - M)
+			pgn = norm(proj_col_psd(D - gradD) - D)
 			pg_norm[n_iter] = pgn
 
 			if pgn < tol:
 				break
 
-			Mold = M
+			Dold = D
 
 			# Search for step size that produces sufficient decrease
 			# ("Armijo rule along the projection arc" in Bertsekas (1999), using shortcut
@@ -449,10 +477,10 @@ class CovarianceDictionary(object):
 			for inner_iter in range(20):
 
 				# Gradient and projection steps.
-				Mnew = proj_col_psd(M - alpha * gradM)
+				Dnew = proj_col_psd(D - alpha * gradD)
 
-				d = Mnew - M
-				gradd = dot(gradM.ravel(), d.ravel())
+				d = Dnew - D
+				gradd = dot(gradD.ravel(), d.ravel())
 				dQd = dot(dot(d, WWt).ravel(), d.ravel())
 				suff_decr = 0.99 * gradd + 0.5 * dQd < 0
 
@@ -464,34 +492,34 @@ class CovarianceDictionary(object):
 				if decr_alpha:
 					# 1.3 ...there is sufficient decrease.
 					if suff_decr:
-						M = Mnew
+						D = Dnew
 						break
 					# 1.2 ...decrease alpha until...
 					else:
 						alpha *= self.psdls_beta
 
 				# 2.3 ...there is not sufficient decrease.
-				elif not suff_decr or (Mold == Mnew).all():
-					M = Mold
+				elif not suff_decr or (Dold == Dnew).all():
+					D = Dold
 					break
 
 				# 2.2 ...increase alpha until...
 				else:
 					alpha /= self.psdls_beta
-					Mold = Mnew
+					Dold = Dnew
 
 			# in_iter[n_iter] = inner_iter
 
 		if n_iter == self.psdls_max_iter:
-			warnings.warn("Max iterations reached in SDLS subproblem.")
+			warnings.warn("Max iterations reached in PSDLS subproblem.")
 
 		pg_norm = pg_norm[: n_iter + 1]
 		# in_iter = in_iter[: n_iter]
 
-		return M, gradM, n_iter 
+		return D, gradD, n_iter 
 
 
-	def _als(self, X, Minit, Winit):
+	def _als(self, X, Dinit, Winit):
 
 		# Solves for covariance module and weights using
 		# alternating constrained least-squares. Same framework
@@ -500,65 +528,79 @@ class CovarianceDictionary(object):
 		n_pair, n_mat = X.shape
 		n = npair2n(n_pair)
 		
-		M = Minit
+		D = Dinit
 		W = Winit
 
 		# Initial gradient.
-		gradM = dot(M, dot(W, W.T)) - dot(X, W.T)
-		gradW = dot(dot(M.T, M), W) - dot(M.T, X)
-		init_grad_norm = norm(vstack((gradM, gradW.T)))
+		gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
+		gradW = dot(dot(D.T, D), W) - dot(D.T, X)
+		init_grad_norm = norm(vstack((gradD, gradW.T)))
 		
 		if self.verbose:
 			print "Initial gradient norm: %f." % init_grad_norm
 			sys.stdout.flush()
 
 		# Stopping tolerances for constrained ALS subproblems.
-		tolM = self.tol * init_grad_norm
-		tolW = tolM
+		tolD = self.tol * init_grad_norm
+		tolW = tolD
 
 		normX = norm(X)
 		objective = empty(self.max_iter)
 		# pg_norm = empty(self.max_iter)
+
+		if self.time:
+			times = empty(self.max_iter)
+			t = time.time()
+		else:
+			times = None
 
 		for n_iter in range(self.max_iter):
 
 			# Stopping criterion, based on Calamai & More (1987) Lemma 3.1(c)
 			# (stationary point iff projected gradient norm = 0).
 			pgradW = gradW * logical_or(gradW < 0, W > 0)
-			pgradM = proj_col_psd(M - gradM) - M
-			pgn = norm(vstack((pgradM, pgradW.T)))
+			pgradD = proj_col_psd(D - gradD) - D
+			pgn = norm(vstack((pgradD, pgradW.T)))
 			# pg_norm[n_iter] = pgn
 
 			# Record objective.
-			obj = norm(X - dot(M, W)) / normX
+			obj = norm(X - dot(D, W)) / normX
 			objective[n_iter] = obj
 
-			if pgn < self.tol * init_grad_norm:
+			if self.time:
+				times[n_iter] = time.time() - t
+
+			# Stopping condition.
+			if self.obj_tol == None:
+				if pgn < self.tol * init_grad_norm:
+					break
+			elif obj < self.obj_tol:
 				break
 
 			if self.verbose:
 				if mod(n_iter, 10) == 0:
-					print 'Iterations: %i. Projected gradient norm: %f.' % (n_iter, pgn)
+					print 'Iter: %i. Projected gradient norm: %f. Objective: %f.' % (n_iter, pgn, obj)
 					sys.stdout.flush()
 
 			# Update modules.
-			M, gradM, iterM = self._psdls_subproblem(X, M, W, tolM)
-			if iterM == 0:
-				tolM = 0.1 * tolM
+			D, gradD, iterD = self._psdls_subproblem(X, D, W, tolD)
+			if iterD == 0:
+				tolD = 0.1 * tolD
 
 			# Update weights.
-			W, gradW, iterW = self._nls_subproblem(X, M, W, tolW)
+			W, gradW, iterW = self._nls_subproblem(X, D, W, tolW)
 			if iterW == 0:
 				tolH = 0.1 * tolW
 
 		if self.verbose:
-			print 'Iterations: %i. Final projected gradient norm: %f.' % (n_iter, pgn)
+			print 'Iter: %i. Final projected gradient norm %f. Final objective %f.' % (n_iter, pgn, obj)
 			sys.stdout.flush()
 
 		objective = objective[: n_iter + 1]
+		times = times[: n_iter + 1]
 		# pg_norm = pg_norm[: n_iter + 1]
 
-		return M, W, objective
+		return D, W, objective, times
 
 
 
@@ -566,14 +608,14 @@ class CovarianceDictionary(object):
 		
 		"""Learns a covariance dictionary from data X and returns dictionary weights."""
 
-		Minit, Winit = self._initialize(X)
+		Dinit, Winit = self._initialize(X)
 
 		if self.method == 'als':
-			M, W, obj = self._als(X, Minit, Winit)
+			D, W, obj = self._als(X, Dinit, Winit)
 		elif self.method == 'admm':
-			M, W, obj = self._admm(X, Minit, Winit)
+			D, W, obj = self._admm(X, Dinit, Winit)
 
-		self.dictionary = M
+		self.dictionary = D
 		self.objective = obj
 
 
@@ -593,7 +635,7 @@ class CovarianceDictionary(object):
 	def transform(self, X):
 		
 		if self.dictionary is not None:
-			W = self._nls_subproblem(X, self.dictionary, rand(k, n_samp))
+			W = self._nls_subproblem(X, self.dictionary, rand(k, n_samp), 1e-3)
 		else:
 			W = self.fit_transform(X)
 
