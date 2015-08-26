@@ -30,8 +30,6 @@ def proj_psd(A):
 	# Projects a symmetric matrix to nearest
 	# positive semi-definite matrix.
 
-	# TODO: Check for symmetry? Should never need to.
-
 	d, U = eigh(A, lower=False)
 	U = U[:, d > 0]
 	d = d[d > 0]
@@ -40,8 +38,6 @@ def proj_psd(A):
 	return Aproj
 
 def proj_corr(A, max_iter=100, tol=1e-6):
-
-	# TODO: If ends up being useful, add max_iter and tol parameters.
 
 	# Projects a symmetric matrix to the nearest correlation
 	# matrix (PSD matrix with equality constraints on
@@ -122,7 +118,7 @@ def proj_col_psd(A, correlation):
 
 def npair2n(n_pair):
 
-	# Number of nodes from number of upper triagonal entries.
+	# Number of nodes from number of upper triangular entries.
 
 	return int((sqrt(1 + 8 * n_pair) - 1) / 2)
 
