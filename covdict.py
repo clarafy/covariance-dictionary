@@ -208,7 +208,7 @@ class CovarianceDictionary(object):
 	def __init__(self, k=2, method='als', init='kmeans', max_iter=None, tol=1e-5, 
 		verbose=False, obj_tol=None, time=False, 
 		nls_beta=0.2, psdls_beta=0.2, nls_max_iter=2000, psdls_max_iter=2000,
-		correlation=False, admm_gamma=0.05, admm_alpha=1e-6):
+		correlation=False, admm_gamma=1, admm_alpha=47.75):
 		
 		if init not in ('kmeans', 'rand'):
 			raise ValueError(
@@ -353,7 +353,9 @@ class CovarianceDictionary(object):
 					sys.stdout.flush()
 
 			# Step size rule.
-			alpha = self.admm_alpha * normX * max_dim / (n_iter + 1)
+			# alpha = self.admm_alpha * normX * max_dim / (n_iter + 1)
+			# beta = alpha * n_samp / n_pair
+			alpha = self.admm_alpha * max_dim / (n_iter + 1)
 			beta = alpha * n_samp / n_pair
 
 			# Primal variable updates.
