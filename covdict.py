@@ -352,20 +352,20 @@ class CovarianceDictionary(object):
 					print 'Iter: %i. Objective: %f.' % (n_iter, obj)
 					sys.stdout.flush()
 
-			# Step size rule.
+			# Step size rule
 			# alpha = self.admm_alpha * normX * max_dim / (n_iter + 1)
 			# beta = alpha * n_samp / n_pair
 			alpha = self.admm_alpha * max_dim / (n_iter + 1)
 			beta = alpha * n_samp / n_pair
 
-			# Primal variable updates.
+			# Primal variable updates
 			U = dot(dot(X, V.T) + alpha * D - Lambda, inv(dot(V, V.T) + alpha * identity(self.k)))
 			V = dot(inv(dot(U.T, U) + beta * identity(self.k)), dot(U.T, X) + beta * W - Pi)
 
 			D = proj_col_psd(U + Lambda / alpha, self.correlation)
 			W = fmax(V + Pi / beta, 0)
 
-			# Dual variable updates.
+			# Dual variable updates
 			Lambda = Lambda + self.admm_gamma * alpha * (U - D)
 			Pi = Pi + self.admm_gamma * beta * (V - W)
 
