@@ -5,7 +5,7 @@ Class for learning dictionary of covariances matrices
 import warnings
 import sys
 import time
-from numpy import (arange, cov, diag, diag_indices, dot, empty, finfo, fmax, 
+from numpy import (arange, cov, diag, diag_indices, dot, dsplit, empty, finfo, fmax, 
 	identity, logical_or, max, mod, sqrt, where, triu_indices, vstack, zeros)
 from numpy.linalg import inv, norm
 from numpy.random import rand
@@ -632,8 +632,23 @@ class CovarianceDictionary(object):
 
 
 	def fit_transform(self, X):
-		
-		"""Learns a covariance dictionary from data X and returns dictionary weights."""
+			
+		"""Learns a dictionary from data X and returns dictionary weights
+
+
+		Parameters
+		----------
+		X : array, shape (n, n, n_samp)
+
+		Returns
+		-------
+		self : object
+			Returns the instance itself
+
+		"""
+
+		# n, _, n_samp = X.shape
+		# X = [mat[triu_indices(n)] for mat in dsplit(X, n_samp)]
 
 		Dinit, Winit = self._initialize(X)
 
