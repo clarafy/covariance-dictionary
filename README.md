@@ -5,9 +5,8 @@
 
 We'd like to solve
 
-minimize ||X - D \* W||^2
-subject to D in P
-           W in R+
+![opt_prob]
+(https://octodex.github.com/images/yaktocat.png)
 
 where X is the input, D is the dictionary, W are the weights, and A and R+ are the feasible sets (details below).
 
