@@ -6,7 +6,7 @@
 We'd like to solve
 
 ![opt_prob]
-(https://octodex.github.com/images/yaktocat.png)
+(https://github.com/clarafj/covariance-dictionary/blob/master/equations/opt_prob.png)
 
 where X is the input, D is the dictionary, W are the weights, and A and R+ are the feasible sets (details below).
 
