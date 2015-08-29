@@ -9,7 +9,7 @@ We'd like to solve
   <img src="https://github.com/clarafj/covariance-dictionary/blob/master/equations/opt_prob.png" width="250">
 </p>
 
-where X is the input, D is the dictionary, W are the weights, and A and R+ are the feasible sets (details below).
+where X is the input, D is the dictionary, W are the weights, and P and R+ are the feasible sets (details below).
 
 #### Variables
 
