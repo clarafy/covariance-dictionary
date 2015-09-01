@@ -76,6 +76,10 @@ def proj_corr(A, max_iter=100, tol=1e-6):
 
     # How exactly is Dykstra's different from ADMM for two projections?
 
+    # Is there a norm under which the closest correlation matrix to a
+    # covariance matrix is its own correlation matrix? Should do projection
+    # under this norm.
+
     n = A.shape[0]
     deltaS = zeros((n, n))
     Y = A
@@ -156,27 +160,26 @@ def npair2n(n_pair):
 class CovarianceDictionary(object):
 
     """
-    Learning a dictionary of covariance matrices.
+    Learns a dictionary of covariance matrices
 
     Parameters
     ----------
     k : int, optional, default = 2
         Number of dictionary elements
 
-    method : str in {'als', 'admm'}, optional, default = 'als'
+    method : str in {'admm', 'als'}, optional, default = 'admm'
         Specifies which optimization algorithm to use. Alternating least-squares
         ('als') and alternating directions method of multipliers ('admm') supported
  
     init : str in {'kmeans', 'rand'}, optional, default = 'kmeans'
         Specifies how to initialize the dictionary and weights. 'k-means'
-        clusters the input data to initialize as in Wild, Curry, & Dougherty (2004) 
-        "Improving non-negative matrix factorizations through structured initialization",
-        and 'rand' initializes to random linear combinations of input.
+        clusters the input data to initialize as in Wild, Curry, & Dougherty (2004),
+        and 'rand' initializes to random linear combinations of input
 
     max_iter : int, optional, default = None
         Maximum number of iterations. If None, 200 for ALS and 6000 for ADMM
 
-    tol : double, optional, default = 1e-6
+    tol : double, optional, default = 1e-5
         Stopping tolerance on projected gradient norm for ALS and objective for ADMM
 
     nls_max_iter : int, optional, default = 2000
@@ -205,10 +208,10 @@ class CovarianceDictionary(object):
         than covariance matrices. Supported for both ALS and ADMM,
         but takes long as chickens for ALS so only use ADMM
 
-    admm_gamma : double, optional, default = 0.05
+    admm_gamma : double, optional, default = 1
         Constant on step size rule for ADMM 
 
-    admm_alpha : double, optional, default = 1e-6
+    admm_alpha : double, optional, default = 47.75
         Scaling constant on penalty on proximal term ||U - D||_F^2 for ADMM
 
     verbose : boolean, optional, default = False
@@ -225,16 +228,22 @@ class CovarianceDictionary(object):
 
     Attributes
     ----------
-    dictionary: array, [n_pair, k]
+    dictionary: array, shape (n, n, k)
         Dictionary of covariance or correlation matrices where each column 
         gives the upper triangle of a dictionary element
 
-    objective: array, [n_iter]
+    objective: array, shape (n_iter)
         Value of objective ||X - DW||_F / ||X||_F at each iteration
+
+    References
+    ----------
+    Bertsekas. 1999.
+    Wild, Curry, & Dougherty. 2004. "Improving non-negative matrix factorizations through
+        structured initialization"
 
     """
 
-    def __init__(self, k=2, method='als', init='kmeans', max_iter=None, tol=1e-5, 
+    def __init__(self, k=2, method='admm', init='kmeans', max_iter=None, tol=1e-5, 
         verbose=False, obj_tol=None, time=False, 
         nls_beta=0.2, psdls_beta=0.2, nls_max_iter=2000, psdls_max_iter=2000,
         correlation=False, admm_gamma=1, admm_alpha=47.75):
@@ -668,11 +677,12 @@ class CovarianceDictionary(object):
         Parameters
         ----------
         X : array, shape (n, n, n_samp)
+            Input covariance data as a stack of n_samp covariance matrices
 
         Returns
         -------
-        self : object
-            Returns the instance itself
+        W : array, shape (k, n_samp)
+            Weights of dictionary elements for input
 
         """
 
@@ -696,7 +706,20 @@ class CovarianceDictionary(object):
 
     def fit(self, X):
 
-        """Learns a covariance dictionary from the covariance data X."""
+        """Learns a covariance dictionary from the covariance data X
+
+
+        Parameters
+        ----------
+        X : array, shape (n, n, n_samp)
+            Input covariance data as a stack of n_samp covariance matrices
+
+        Returns
+        -------
+        self : object
+            The instance itself
+
+        """
 
         self.fit_transform(X)
         return self
@@ -704,6 +727,21 @@ class CovarianceDictionary(object):
 
 
     def transform(self, X):
+
+        """Computes the dictionary weights for input covariance data
+
+
+        Parameters
+        ----------
+        X : array, shape (n, n, n_samp)
+            Input covariance data as a stack of n_samp covariance matrices
+
+        Returns
+        -------
+        W : array, shape (k, n_samp)
+            Weights of dictionary elements for each input
+
+        """
 
         X = unpack_samples(X)
         if self.dictionary is not None:
