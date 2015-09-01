@@ -32,7 +32,10 @@ We support two algorithms for solving the problem, described below. In practice 
 
 #### Alternating Directions Method of Multipliers (ADMM)
 
+#### Douglas-Rachford (DR)
+
 #### Alternating Least-Squares (ALS)
+
 
 
 
