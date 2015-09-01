@@ -50,9 +50,6 @@ def unpack_samples(packed):
     # into a column of the 2D output.
 
     n, _, n_samp = packed.shape
-    # Cost if checking if n_pair is provided >=
-    # cost of just computing n_pair.
-    n_pair = n * (n + 1) / 2
     return vstack([mat[triu_indices(n)] for mat in packed.T]).T
 
 
@@ -688,6 +685,7 @@ class CovarianceDictionary(object):
             D, W, obj, times = self._admm(X, Dinit, Winit)
 
         self.dictionary = pack_samples(D)
+        self.D = D
         self.objective = obj
         self.times = times
 
