@@ -13,7 +13,7 @@ where X is the input, D is the dictionary, W are the weights, and P and R+ are t
 
 #### Variables
 
-Though the input is an (n, n, n_samples) array of CMs, the actual optimization grunt-work is done in terms of a reformatted, more compact (n_pairs, n_samples) array X where the i-th column is the vectorized upper triangle of the i-th CM in X, and n_pairs = n \* (n + 1) / 2 is the number of upper-triangular entries. 
+Though the input is an (n_samples, n, n) array of CMs, the actual optimization grunt-work is done in terms of a reformatted, more compact (n_pairs, n_samples) array X where the i-th column is the vectorized upper triangle of the i-th CM in X, and n_pairs = n \* (n + 1) / 2 is the number of upper-triangular entries. 
 
 Borrowing terminology from signal processing, we'll learn an (n_pairs, k) __dictionary__ D of k CM __elements__, as well as a (k, n_samples) array of __weights__ W where the i-th column gives the weights to (approximately) reconstruct the i-th CM in X from the dictionary elements. In practice W tends to end up sparse, even though we don't explicitly enforce sparsity.
 
