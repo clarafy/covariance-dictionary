@@ -1,4 +1,4 @@
 *.pyc
 .ipynb_checkpoints/*
-examples/.ipynb_checkpoints/*
-examples/test.ipynb
+demos/.ipynb_checkpoints/*
+demos/test.ipynb
