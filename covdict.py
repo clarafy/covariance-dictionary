@@ -12,6 +12,36 @@ from scipy.linalg import eigh, inv, norm
 
 
 
+def plot_element(element, coords, thresh=0.5, size=200, colors=None):
+
+    # TODO: If covariance and not correlation element, need to normalize
+    # line widths (commented out below).
+
+    from numpy import array, percentile
+    import matplotlib.pyplot as plt
+
+    n = element.shape[0]
+    if colors is None:
+        colors = 'DarkGray'
+
+    edges_pos = where(element > percentile(element[element > 0], 100 * thresh))
+    # alpha_pos = element[edges_pos] / max(element[element > 0])
+    width_pos = element[edges_pos] * 5
+    edges_neg = where(-element > percentile(-element[element < 0], 100 * thresh))
+    # alpha_neg = -element[edges_neg] / max(-element[element < 0])
+    width_neg = -element[edges_neg] * 5
+
+    for i, edge in enumerate(array(edges_pos).T):
+        plt.plot(coords[edge, 0], coords[edge, 1], 'YellowGreen', linewidth=width_pos[i]);
+
+    for i, edge in enumerate(array(edges_neg).T):
+        plt.plot(coords[edge, 0], coords[edge, 1], 'PaleVioletRed', linewidth=width_neg[i]);
+
+    plt.scatter(coords[:, 0], coords[:, 1], s=size, linewidth=0, c=colors);
+    plt.axis('off')
+
+
+
 def pack(vec, n=None, half=False):
 
     # Reforms a vector into the upper triangle
