@@ -1,4 +1,3 @@
 *.pyc
-.ipynb_checkpoints/*
 demos/.ipynb_checkpoints/*
 demos/test.ipynb

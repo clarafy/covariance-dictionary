@@ -1,5 +1,5 @@
 """ 
-Class for learning dictionary of covariances matrices
+Class and functions for learning dictionary of covariances matrices
 """
 
 import warnings
@@ -209,7 +209,7 @@ class CovarianceDictionary(object):
     max_iter : int, optional, default = None
         Maximum number of iterations. If None, 200 for ALS and 6000 for ADMM
 
-    tol : double, optional, default = 1e-5
+    tol : float, optional, default = 1e-5
         Stopping tolerance on projected gradient norm for ALS and objective for ADMM
 
     nls_max_iter : int, optional, default = 2000
@@ -220,13 +220,13 @@ class CovarianceDictionary(object):
         Maximum number of iterations for the positive semidefinite least-squares
         subproblem in ALS
 
-    nls_beta : double >= 0 and <= 1, optional, default = 0.2
+    nls_beta : float >= 0 and <= 1, optional, default = 0.2
         Step size search parameter for the non-negative least-squares subproblem
         in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999)
         Larger values mean larger jumps in searching for step size, so
         can speed up convergence but may be less accurate
 
-    psdls_beta : double >= 0 and <= 1, optional, default = 0.2
+    psdls_beta : float >= 0 and <= 1, optional, default = 0.2
         Step size search parameter for the positive-semidefinite least-squares subproblem
         in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999).
         Larger values mean larger jumps in searching for step size, so
@@ -238,10 +238,10 @@ class CovarianceDictionary(object):
         than covariance matrices. Supported for both ALS and ADMM,
         but takes long as chickens for ALS so only use ADMM
 
-    admm_gamma : double, optional, default = 1
+    admm_gamma : float, optional, default = 1
         Constant on step size rule for ADMM 
 
-    admm_alpha : double, optional, default = 47.75
+    admm_alpha : float, optional, default = 47.75
         Scaling constant on penalty on proximal term ||U - D||_F^2 for ADMM
 
     verbose : boolean, optional, default = False
@@ -251,7 +251,7 @@ class CovarianceDictionary(object):
     time : boolean, optional, default = False 
         Whether to time each iteration
 
-    obj_tol : double, optional, default = None
+    obj_tol : float, optional, default = None
         Stopping condition on raw objective value. If None, stopping rule is 
         instead based on objective decrease for ADMM and projected gradient norm for ALS.
         Should only be used when true minimum objective value is known
@@ -483,7 +483,7 @@ class CovarianceDictionary(object):
             # Search for step size that produces sufficient decrease
             # ("Armijo rule along the projection arc" in Bertsekas (1999), using shortcut
             # condition in Lin (2007) Eq. (17)).
-            for inner_iter in range(5):
+            for inner_iter in range(10):
 
                 # Gradient step.
                 Wnew = W - alpha * grad
@@ -758,8 +758,8 @@ class CovarianceDictionary(object):
 
     def transform(self, X):
 
-        """Computes the dictionary weights for input covariance data
-
+        """
+        Computes the dictionary weights for input covariance data
 
         Parameters
         ----------
