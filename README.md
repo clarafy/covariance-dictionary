@@ -1,5 +1,5 @@
 # covariance-dictionary
-`covdict` is a module for learning a dictionary of covariance matrices, inspired by prior algorithms like [this one] (http://www.cs.technion.ac.il/~elad/publications/journals/2004/32_KSVD_IEEE_TSP.pdf) for dictionary learning for sparse image representation. The covariance dictionary can then be used to sparsely represent a complicated time series in terms of its evolving covariance ("network") structure.
+`covdict` is a module for learning a dictionary of covariance matrices, inspired by prior algorithms like [this one] (http://www.cs.technion.ac.il/~elad/publications/journals/2004/32_KSVD_IEEE_TSP.pdf) for dictionary learning for sparse image representation. The covariance dictionary can then be used to sparsely represent a complicated time series in terms of its evolving covariance ("network") structure. Check out [this IPython notebook](https://github.com/clarafj/covariance-dictionary/blob/master/demos/zebra_demo.ipynb) for a demo on neural developmental data.
 
 ## Optimization problem
 
@@ -13,7 +13,7 @@ where _X_ is the input, _D_ is the dictionary, _W_ are the weights, and _P_ and 
 
 #### Variables
 
-Let _n_ be the number of variables in your data. The input is an _(n_samples, n, n)_ array of covariance matrices---for example, sample covariance matrices computed from different sections of time series data. However, the actual optimization grunt-work is done in terms of a reformatted, more compact _(n_pairs, n_samples)_ array _X_ where the _i_-th column is the vectorized upper triangle of the _i_-th covariance matrix in _X_, and _n_pairs_ = _n_ \* (_n_ + 1) / 2 is the number of upper-triangular entries. 
+Let _n_ be the number of variables in your data. The input is an _(n_samples, n, n)_ array of covariance matrices; for example, sample covariance matrices computed from different sections of time series data. However, the actual optimization grunt-work is done in terms of a reformatted, more compact _(n_pairs, n_samples)_ array _X_ where the _i_-th column is the vectorized upper triangle of the _i_-th covariance matrix in _X_, and _n_pairs_ = _n_ \* (_n_ + 1) / 2 is the number of upper-triangular entries. 
 
 Borrowing terminology from signal processing, we'll learn an _(n_pairs, k)_ __dictionary__ _D_ of _k_ covariance matrix __elements__, as well as a _(k, n_samples)_ array of __weights__ _W_ where the _i_-th column gives the weights to (approximately) reconstruct the _i_-th covariance matrix in _X_ from the dictionary elements. In practice _W_ tends to end up sparse, even though we don't explicitly enforce sparsity.
 
