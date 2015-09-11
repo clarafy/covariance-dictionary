@@ -23,7 +23,7 @@ The basic idea is to find a dictionary _D_ and weights _W_ that minimize the err
 
 #### Constraints
 
-1. Since we want each dictionary element to be a valid covariance matrix, or positive semi-definite (PSD), let's call _P_ the set of all valid dictionaries (or to put it inelegantly, the set of all _(n_pairs, k)_ matrices such that each column corresponds to the upper triangle of a PSD matrix). We want _D_ to be in _P_. (For applications where analyzing the correlation matrix makes more sense, the correlation matrix constraint is also supported for ADMM.)
+1. Since we want each dictionary element to be a valid covariance matrix, or positive semi-definite (PSD), let's call _P_ the set of all valid dictionaries (or to put it inelegantly, the set of all _(n_pairs, k)_ matrices such that each column corresponds to the upper triangle of a PSD matrix). We want _D_ to be in _P_. For applications where analyzing the correlation matrix makes more sense, the correlation matrix constraint is also supported for ADMM.
 2. For our weights to be easily interpretable, we also want them to be non-negative, or _W_ in _R+_ where _R+_ denotes the non-negative orthant for _(k, n_samples)_ matrices.
 
 ## Algorithms
@@ -34,7 +34,7 @@ We support two algorithms for solving the problem, described below. In practice 
 
 #### Douglas-Rachford (DR)
 
-(Coming soon. Very similar in formulation to ADMM, but for some problems in signal processing, like [phase retrieval](https://www.osapublishing.org/josaa/abstract.cfm?uri=josaa-19-7-1334) the literature suggests it works better.)
+(Coming soon. Very similar to ADMM, but for some problems in signal processing like [phase retrieval](https://www.osapublishing.org/josaa/abstract.cfm?uri=josaa-19-7-1334) it seems to works better.)
 
 #### Alternating Least-Squares (ALS)
 
