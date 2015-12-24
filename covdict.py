@@ -197,20 +197,24 @@ class CovarianceDictionary(object):
     k : int, optional, default = 2
         Number of dictionary elements
 
-    method : str in {'admm', 'als'}, optional, default = 'admm'
+    method : str in {'admm', 'als', 'pgm'}, optional, default = 'admm'
         Specifies which optimization algorithm to use. Alternating least-squares
-        ('als') and alternating directions method of multipliers ('admm') supported
+        ('als'), alternating directions method of multipliers ('admm'), and
+        projected gradient method ('pgm') supported
  
     init : str in {'kmeans', 'rand'}, optional, default = 'kmeans'
         Specifies how to initialize the dictionary and weights. 'k-means'
         clusters the input data to initialize as in Wild, Curry, & Dougherty (2004),
-        and 'rand' initializes to random linear combinations of input
+        and 'rand' initializes to random linear combinations of input.
+        Random initialization completely derails ADMM, takes forever to converge.
 
     max_iter : int, optional, default = None
         Maximum number of iterations. If None, 200 for ALS and 6000 for ADMM
 
-    tol : float, optional, default = 1e-5
-        Stopping tolerance on projected gradient norm for ALS and objective for ADMM
+    tol : float, optional, default = 1e-5 for ALS and ADMM, 1e-3 for PGM
+        Stopping tolerance on projected gradient norm for ALS and PGM, and objective for ADMM.
+        Taking it easy on PGM, poor thing tends to converge at much greater objective values,
+        consistent with Lin (2007).
 
     nls_max_iter : int, optional, default = 2000
         Maximum number of iterations for the non-negative least-squares subproblem
@@ -220,18 +224,22 @@ class CovarianceDictionary(object):
         Maximum number of iterations for the positive semidefinite least-squares
         subproblem in ALS
 
-    nls_beta : float >= 0 and <= 1, optional, default = 0.2
+    nls_beta : float > 0 and < 1, optional, default = 0.2
         Step size search parameter for the non-negative least-squares subproblem
         in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999)
         Larger values mean larger jumps in searching for step size, so
         can speed up convergence but may be less accurate
 
-    psdls_beta : float >= 0 and <= 1, optional, default = 0.2
+    psdls_beta : float > 0 and < 1, optional, default = 0.2
         Step size search parameter for the positive-semidefinite least-squares subproblem
         in ALS, as in "Armijo rule along the projection arc" in Bertsekas (1999).
         Larger values mean larger jumps in searching for step size, so
         can speed up convergence but may be less accurate. Empirically
         larger psdls_beta affects accuracy more so than nls_beta
+
+    pgm_beta : float > 0 and < 2, optional, default = 0.5
+    	Step size search parameter for the projected gradient method, as in
+    	"Armijo rule along the projection arc" in Bertsekas (1999).
 
     correlation : boolean, optional, default = False
         Whether to find dictionary of correlation matrices rather
@@ -267,43 +275,57 @@ class CovarianceDictionary(object):
 
     References
     ----------
+    Bertsekas. 1976.
     Bertsekas. 1999.
-    Wild, Curry, & Dougherty. 2004. "Improving non-negative matrix factorizations through
+    Calamai & More (1999)
+    Lin, C.-J. & More (1999)
+    Lin, C.-J. (2007). "Projected gradient methods for non-negative matrix factorization".
+    	Neural Computation.
+    Wild, Curry, & Dougherty. (2004). "Improving non-negative matrix factorizations through
         structured initialization"
+    Xu, Y., Yin, W., Wen, Z., & Zhang, Y. (2012). "An alternating direction algorithm for matrix 
+        completion with nonnegative factors". 
 
     """
 
-    def __init__(self, k=2, method='admm', init='kmeans', max_iter=None, tol=1e-5, 
+    def __init__(self, k=2, method='admm', init='kmeans', max_iter=None, tol=None, 
         verbose=False, obj_tol=None, time=False, 
         nls_beta=0.2, psdls_beta=0.2, nls_max_iter=2000, psdls_max_iter=2000,
-        correlation=False, admm_gamma=1, admm_alpha=47.75):
-        
+        pgm_beta=0.5, correlation=False, admm_gamma=1, admm_alpha=47.75):
+
+        if method not in ('als', 'admm', 'pgm'):
+            raise ValueError(
+                                'Invalid method: got %r instead of one of %r' %
+                                (method, ('als', 'admm', 'pgm')))
+        self.method = method
+
         if init not in ('kmeans', 'rand'):
             raise ValueError(
                                 'Invalid initialization: got %r instead of one of %r' %
                                 (init, ('kmeans', 'rand')))
         self.init = init
 
-        if method not in ('als', 'admm'):
-            raise ValueError(
-                                'Invalid method: got %r instead of one of %r' %
-                                (method, ('als', 'admm')))
-        self.method = method
-
         if max_iter is None:
             if self.method == 'als':
                 self.max_iter = 200
             elif self.method == 'admm':
                 self.max_iter = 6000
+            elif self.method == 'pgm':
+            	self.max_iter = 600
         else:
             self.max_iter = max_iter
 
+        if tol is None:
+        	self.tol = 1e-3 if self.method == 'pgm' else 1e-5
+        else:
+        	self.tol = tol
+
         self.k = k
-        self.tol = tol
         self.nls_max_iter = nls_max_iter
         self.psdls_max_iter = psdls_max_iter
         self.nls_beta = nls_beta
         self.psdls_beta = psdls_beta
+        self.pgm_beta = pgm_beta
         self.correlation = correlation
         self.admm_gamma = admm_gamma
         self.admm_alpha = admm_alpha
@@ -328,24 +350,20 @@ class CovarianceDictionary(object):
 
         if self.init == 'kmeans':
 
-            Xnorm = X / hstack([norm(col) for col in X.T]) 
+        	# Initialize modules to k-means cluster centroids.
 
+            Xnorm = X / hstack([norm(col) for col in X.T]) 
             km = KMeans(n_clusters=self.k).fit(Xnorm.T)
             centroids = km.cluster_centers_.T
             Dinit = proj_col_psd(centroids, self.correlation)
-
-            labels = km.predict(Xnorm.T)
-            Winit = zeros((self.k, n_samp))
-            Winit[labels, arange(n_samp)] = 1
-
 
         elif self.init == 'rand':
 
             # Initialize modules to random linear combinations
             # of input covariances.
             Dinit = dot(X, rand(n_samp, self.k))
-            Winit, _, _ = self._nls_subproblem(X, Dinit, rand(self.k, n_samp), 1e-3)
 
+        Winit, _, _ = self._nls_subproblem(X, Dinit, rand(self.k, n_samp), 1e-3)
         return Dinit, Winit
 
 
@@ -482,7 +500,7 @@ class CovarianceDictionary(object):
 
             # Search for step size that produces sufficient decrease
             # ("Armijo rule along the projection arc" in Bertsekas (1999), using shortcut
-            # condition in Lin (2007) Eq. (17)).
+            # condition in Lin (2007) Eq. (16)).
             for inner_iter in range(10):
 
                 # Gradient step.
@@ -491,7 +509,7 @@ class CovarianceDictionary(object):
                 # Projection step.
                 Wnew *= Wnew > 0
 
-                # Check Lin (2007) Eq. (17) condition.
+                # Check Lin (2007) Eq. (16) condition.
                 d = Wnew - W
                 gradd = dot(grad.ravel(), d.ravel())
                 dQd = dot(dot(DtD, d).ravel(), d.ravel())
@@ -567,7 +585,7 @@ class CovarianceDictionary(object):
 
             # Search for step size that produces sufficient decrease
             # ("Armijo rule along the projection arc" in Bertsekas (1999), using shortcut
-            # condition in Lin (2007) Eq. (17).)
+            # condition in Lin (2007) Eq. (16).)
             for inner_iter in range(20):
 
                 # Gradient and projection steps.
@@ -699,6 +717,127 @@ class CovarianceDictionary(object):
 
 
 
+    def _pgm(self, X, Dinit, Winit):
+
+    	# Solves for covariance module and weights using
+        # a projected gradient method.
+
+        n_pair, n_mat = X.shape
+        n = npair2n(n_pair)
+        
+        D = Dinit
+        W = Winit
+
+        # Initial gradient.
+        gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
+        gradW = dot(dot(D.T, D), W) - dot(D.T, X)
+        init_grad_norm = norm(vstack((gradD, gradW.T)))
+        
+        if self.verbose:
+            print "Initial gradient norm: %f." % init_grad_norm
+            sys.stdout.flush()
+
+        normX = norm(X)
+        objective = empty(self.max_iter)
+
+        if self.time:
+            times = empty(self.max_iter)
+            t = time.time()
+        else:
+            times = None
+
+        alpha = 1
+
+        for n_iter in range(self.max_iter):
+
+            # Compute projected gradient for stopping condition. 
+            pgradW = gradW * logical_or(gradW < 0, W > 0)
+            pgradD = proj_col_psd(D - gradD, self.correlation) - D
+            pgn = norm(vstack((pgradD, pgradW.T)))
+
+            # Record objective.
+            obj = norm(X - dot(D, W)) / normX
+            objective[n_iter] = obj
+
+            if self.time:
+                times[n_iter] = time.time() - t
+
+            # Stopping criterion, based on Calamai & More (1987) Lemma 3.1(c)
+            # (stationary point iff projected gradient norm = 0).
+            if self.obj_tol is None:
+                if pgn < self.tol * init_grad_norm:
+                    break
+            elif obj < self.obj_tol:
+                break
+
+            if self.verbose:
+                print 'Iter: %i. Projected gradient norm: %f. Objective: %f.' % (n_iter, pgn, obj)
+                sys.stdout.flush()
+
+            Wold = W
+            Dold = D
+
+            # Search for step size that produces sufficient decrease
+            # ("Armijo rule along the projection arc" in Bertsekas (1999)), using
+            # "warm-start" trick in Lin & More (1999).
+            for inner_iter in range(20):
+
+            	# Proposed updates of dictionary and weights
+            	# (gradient step and projection step)
+                # Gradient step.
+                Wnew = W - alpha * gradW
+                Wnew *= Wnew > 0
+                Dnew = proj_col_psd(D - alpha * gradD, self.correlation)
+
+                # Check for sufficient decrease.
+                obj_old = pow(obj * normX, 2)
+                obj_new = pow(norm(X - dot(Dnew, Wnew)), 2)
+                W_thresh_decr = dot(gradW.ravel(), (Wnew - W).ravel())
+                D_thresh_decr = dot(gradD.ravel(), (Dnew - D).ravel())
+                suff_decr = obj_new - obj_old < 0.01 * (W_thresh_decr + D_thresh_decr)
+
+                # 1.1 If initially not sufficient decrease, then...
+                # 2.1 If initially sufficient decrease, then...
+                if inner_iter == 0:
+                    decr_alpha = not suff_decr
+
+                if decr_alpha:
+                    # 1.3 ...there is sufficient decrease.
+                    if suff_decr:
+                        W = Wnew
+                        D = Dnew
+                        break
+                    # 1.2 ...decrease alpha until...
+                    else:
+                        alpha *= self.pgm_beta
+
+                # 2.3 ...there is not sufficient decrease.
+                elif not suff_decr or ((Wold == Wnew).all() and (Dold == Dnew).all()):
+                    W = Wold
+                    D = Dold
+                    break
+
+                # 2.2 ...increase alpha until...
+                else:
+                    alpha /= self.pgm_beta
+                    Wold = Wnew
+                    Dold = Dnew
+
+            gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
+            gradW = dot(dot(D.T, D), W) - dot(D.T, X)
+
+        if self.verbose:
+            print 'Iter: %i. Final projected gradient norm %f. Final objective %f.' % (n_iter, pgn, obj)
+            sys.stdout.flush()
+
+        objective = objective[: n_iter + 1]
+        if self.time:
+            times = times[: n_iter + 1]
+
+        return D, W, objective, times
+
+
+
     def fit_transform(self, X):
             
         """Learns a dictionary from data X and returns dictionary weights
@@ -723,6 +862,8 @@ class CovarianceDictionary(object):
             D, W, obj, times = self._als(X, Dinit, Winit)
         elif self.method == 'admm':
             D, W, obj, times = self._admm(X, Dinit, Winit)
+        elif self.method == 'pgm':
+            D, W, obj, times = self._pgm(X, Dinit, Winit)
 
         self.dictionary = pack_samples(D)
         self.D = D

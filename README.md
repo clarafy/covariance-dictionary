@@ -32,9 +32,7 @@ We support two algorithms for solving the problem, described below. In practice 
 
 #### Alternating Directions Method of Multipliers (ADMM)
 
-#### Douglas-Rachford (DR)
-
-(Coming soon. Very similar to ADMM, but for some problems in signal processing like [phase retrieval](https://www.osapublishing.org/josaa/abstract.cfm?uri=josaa-19-7-1334) it seems to works better.)
+#### Projected Gradient Method (PGM)
 
 #### Alternating Least-Squares (ALS)
 
