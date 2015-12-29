@@ -467,6 +467,27 @@ class CovarianceDictionary(object):
         return D, W, objective, times
 
 
+    # TODO: define global enum (?) for SUFF_DECR, INSUFF_DECR
+    def _adjust_step(decr_alpha, suff_decr, alpha, beta):
+
+    	# 1(a) If initially not sufficient decrease...
+    	if decr_alpha:
+	        # 1(c) ...there is sufficient decrease.
+	        if suff_decr:
+	            return SUFF_DECR
+	        # 1(b) ...decrease alpha until...
+	        else:
+	            return alpha * beta
+
+	    # 2(b) ...there is not sufficient decrease.
+	    elif not suff_decr or (Wold == Wnew).all():
+	        return INSUFF_DECR
+
+	    # 2(a) If initially sufficient decrease, increase alpha until...
+	    else:
+	        return alpha / beta
+
+
 
     def _nls_subproblem(self, X, D, Winit, tol):
 
@@ -503,10 +524,8 @@ class CovarianceDictionary(object):
             # condition in Lin (2007) Eq. (16)).
             for inner_iter in range(10):
 
-                # Gradient step.
+                # Gradient and projection step.
                 Wnew = W - alpha * grad
-
-                # Projection step.
                 Wnew *= Wnew > 0
 
                 # Check Lin (2007) Eq. (16) condition.
@@ -515,29 +534,42 @@ class CovarianceDictionary(object):
                 dQd = dot(dot(DtD, d).ravel(), d.ravel())
                 suff_decr = 0.99 * gradd + 0.5 * dQd < 0
 
+                if inner_iter == 0:
+                	decr_alpha = not suff_decr
+
+                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.nls_beta)
+                if (status == SUFF_DECR):
+                	W = Wnew
+                	break
+                elif (status == INSUFF_DECR):
+                	W = Wold
+                	break
+                else:
+                	alpha = status
+
                 # 1.1 If initially not sufficient decrease, then...
                 # 2.1 If initially sufficient decrease, then...
-                if inner_iter == 0:
-                    decr_alpha = not suff_decr
+                # if inner_iter == 0:
+                #     decr_alpha = not suff_decr
 
-                if decr_alpha:
-                    # 1.3 ...there is sufficient decrease.
-                    if suff_decr:
-                        W = Wnew
-                        break
-                    # 1.2 ...decrease alpha until...
-                    else:
-                        alpha *= self.nls_beta
+                # if decr_alpha:
+                #     # 1.3 ...there is sufficient decrease.
+                #     if suff_decr:
+                #         W = Wnew
+                #         break
+                #     # 1.2 ...decrease alpha until...
+                #     else:
+                #         alpha *= self.nls_beta
 
-                # 2.3 ...there is not sufficient decrease.
-                elif not suff_decr or (Wold == Wnew).all():
-                    W = Wold
-                    break
+                # # 2.3 ...there is not sufficient decrease.
+                # elif not suff_decr or (Wold == Wnew).all():
+                #     W = Wold
+                #     break
 
-                # 2.2 ...increase alpha until...
-                else:
-                    alpha /= self.nls_beta
-                    Wold = Wnew
+                # # 2.2 ...increase alpha until...
+                # else:
+                #     alpha /= self.nls_beta
+                #     Wold = Wnew
 
             # in_iter[n_iter] = inner_iter
 
@@ -596,29 +628,37 @@ class CovarianceDictionary(object):
                 dQd = dot(dot(d, WWt).ravel(), d.ravel())
                 suff_decr = 0.99 * gradd + 0.5 * dQd < 0
 
-                # 1.1 If initially not sufficient decrease, then...
-                # 2.1 If initially sufficient decrease, then...
                 if inner_iter == 0:
                     decr_alpha = not suff_decr
 
-                if decr_alpha:
-                    # 1.3 ...there is sufficient decrease.
-                    if suff_decr:
-                        D = Dnew
-                        break
-                    # 1.2 ...decrease alpha until...
-                    else:
-                        alpha *= self.psdls_beta
-
-                # 2.3 ...there is not sufficient decrease.
-                elif not suff_decr or (Dold == Dnew).all():
-                    D = Dold
-                    break
-
-                # 2.2 ...increase alpha until...
+                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.psdls_beta)
+                if (status == SUFF_DECR):
+                	D = Dnew
+                	break
+                elif (status == INSUFF_DECR):
+                	D = Dold
+                	break
                 else:
-                    alpha /= self.psdls_beta
-                    Dold = Dnew
+                	alpha = status
+
+                # if decr_alpha:
+                #     # 1.3 ...there is sufficient decrease.
+                #     if suff_decr:
+                #         D = Dnew
+                #         break
+                #     # 1.2 ...decrease alpha until...
+                #     else:
+                #         alpha *= self.psdls_beta
+
+                # # 2.3 ...there is not sufficient decrease.
+                # elif not suff_decr or (Dold == Dnew).all():
+                #     D = Dold
+                #     break
+
+                # # 2.2 ...increase alpha until...
+                # else:
+                #     alpha /= self.psdls_beta
+                #     Dold = Dnew
 
             # in_iter[n_iter] = inner_iter
 
@@ -796,32 +836,42 @@ class CovarianceDictionary(object):
                 D_thresh_decr = dot(gradD.ravel(), (Dnew - D).ravel())
                 suff_decr = obj_new - obj_old < 0.01 * (W_thresh_decr + D_thresh_decr)
 
-                # 1.1 If initially not sufficient decrease, then...
-                # 2.1 If initially sufficient decrease, then...
                 if inner_iter == 0:
                     decr_alpha = not suff_decr
 
-                if decr_alpha:
-                    # 1.3 ...there is sufficient decrease.
-                    if suff_decr:
-                        W = Wnew
-                        D = Dnew
-                        break
-                    # 1.2 ...decrease alpha until...
-                    else:
-                        alpha *= self.pgm_beta
-
-                # 2.3 ...there is not sufficient decrease.
-                elif not suff_decr or ((Wold == Wnew).all() and (Dold == Dnew).all()):
-                    W = Wold
-                    D = Dold
-                    break
-
-                # 2.2 ...increase alpha until...
+                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.pgm_beta)
+                if (status == SUFF_DECR):
+                	W = Wnew
+                	D = Dnew
+                	break
+                elif (status == INSUFF_DECR):
+                	W = Wold
+                	D = Dold
+                	break
                 else:
-                    alpha /= self.pgm_beta
-                    Wold = Wnew
-                    Dold = Dnew
+                	alpha = status
+
+                # if decr_alpha:
+                #     # 1.3 ...there is sufficient decrease.
+                #     if suff_decr:
+                #         W = Wnew
+                #         D = Dnew
+                #         break
+                #     # 1.2 ...decrease alpha until...
+                #     else:
+                #         alpha *= self.pgm_beta
+
+                # # 2.3 ...there is not sufficient decrease.
+                # elif not suff_decr or ((Wold == Wnew).all() and (Dold == Dnew).all()):
+                #     W = Wold
+                #     D = Dold
+                #     break
+
+                # # 2.2 ...increase alpha until...
+                # else:
+                #     alpha /= self.pgm_beta
+                #     Wold = Wnew
+                #     Dold = Dnew
 
             gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
             gradW = dot(dot(D.T, D), W) - dot(D.T, X)
