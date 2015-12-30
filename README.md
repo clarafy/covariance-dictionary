@@ -1,5 +1,5 @@
 # covariance-dictionary
-`covdict` is a module for learning a dictionary of covariance matrices, inspired by prior algorithms like [this one] (http://www.cs.technion.ac.il/~elad/publications/journals/2004/32_KSVD_IEEE_TSP.pdf) for dictionary learning for sparse image representation. The covariance dictionary can then be used to uncover the evolving covariance structure of a time series (see the [manuscript draft](https://www.stanford.edu/~clarafj/fannjiang_covdict_draft.pdf) for more details). Check out [this IPython notebook](https://github.com/clarafj/covariance-dictionary/blob/master/demos/zebra_demo.ipynb) for a demo on neural developmental data.
+`covdict` is a module for learning a dictionary of covariance matrices, inspired by prior algorithms like [this one] (http://www.cs.technion.ac.il/~elad/publications/journals/2004/32_KSVD_IEEE_TSP.pdf) for dictionary learning for sparse image representation. The covariance dictionary can then be used to uncover the evolving covariance structure, or "network structure", of a time series (see the [manuscript draft](http://www.stanford.edu/~clarafj/fannjiang_covdict_draft.pdf) for more details). Check out [this IPython notebook](http://github.com/clarafj/covariance-dictionary/blob/master/demos/zebra_demo.ipynb) for a demo on neural developmental data.
 
 ## Optimization problem
 
