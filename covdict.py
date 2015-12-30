@@ -243,8 +243,8 @@ class CovarianceDictionary(object):
 
     correlation : boolean, optional, default = False
         Whether to find dictionary of correlation matrices rather
-        than covariance matrices. Supported for both ALS and ADMM,
-        but takes long as chickens for ALS so only use ADMM
+        than covariance matrices. Supported for all algorithms,
+        but takes long as chickens for ALS so only use ADMM or PGM
 
     admm_gamma : float, optional, default = 1
         Constant on step size rule for ADMM 
@@ -261,7 +261,7 @@ class CovarianceDictionary(object):
 
     obj_tol : float, optional, default = None
         Stopping condition on raw objective value. If None, stopping rule is 
-        instead based on objective decrease for ADMM and projected gradient norm for ALS.
+        instead based on objective decrease for ADMM and projected gradient norms for ALS and PGM.
         Should only be used when true minimum objective value is known
 
     Attributes
@@ -287,6 +287,9 @@ class CovarianceDictionary(object):
         completion with nonnegative factors". 
 
     """
+
+    # SUFF_DECR = -1
+    # INSUFF_DECR = -2
 
     def __init__(self, k=2, method='admm', init='kmeans', max_iter=None, tol=None, 
         verbose=False, obj_tol=None, time=False, 
@@ -351,7 +354,6 @@ class CovarianceDictionary(object):
         if self.init == 'kmeans':
 
         	# Initialize modules to k-means cluster centroids.
-
             Xnorm = X / hstack([norm(col) for col in X.T]) 
             km = KMeans(n_clusters=self.k).fit(Xnorm.T)
             centroids = km.cluster_centers_.T
@@ -388,7 +390,7 @@ class CovarianceDictionary(object):
         # each element of V is non-negative
 
         # and sequentially minimize the augmented Lagrangian
-        # w.r.t U, V, D, and W.
+        # w.r.t U, V, D, and W, then update dual variables
 
         # Can also solve problem under constraint of correlation
         # matrices rather than general PSD matrices.
@@ -468,23 +470,23 @@ class CovarianceDictionary(object):
 
 
     # TODO: define global enum (?) for SUFF_DECR, INSUFF_DECR
-    def _adjust_step(decr_alpha, suff_decr, alpha, beta):
+    def _adjust_step(self, decr_alpha, suff_decr, alpha, beta):
 
     	# 1(a) If initially not sufficient decrease...
-    	if decr_alpha:
+        if decr_alpha:
 	        # 1(c) ...there is sufficient decrease.
-	        if suff_decr:
+	    	if suff_decr:
 	            return SUFF_DECR
 	        # 1(b) ...decrease alpha until...
 	        else:
 	            return alpha * beta
 
 	    # 2(b) ...there is not sufficient decrease.
-	    elif not suff_decr or (Wold == Wnew).all():
+        elif not suff_decr: # or (Wold == Wnew).all():
 	        return INSUFF_DECR
 
 	    # 2(a) If initially sufficient decrease, increase alpha until...
-	    else:
+        else:
 	        return alpha / beta
 
 
@@ -537,39 +539,39 @@ class CovarianceDictionary(object):
                 if inner_iter == 0:
                 	decr_alpha = not suff_decr
 
-                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.nls_beta)
-                if (status == SUFF_DECR):
-                	W = Wnew
-                	break
-                elif (status == INSUFF_DECR):
-                	W = Wold
-                	break
-                else:
-                	alpha = status
+                # status = self._adjust_step(decr_alpha, suff_decr, alpha, self.nls_beta)
+                # if (status == SUFF_DECR):
+                # 	W = Wnew
+                # 	break
+                # elif (status == INSUFF_DECR):
+                # 	W = Wold
+                # 	break
+                # else:
+                # 	alpha = status
 
                 # 1.1 If initially not sufficient decrease, then...
                 # 2.1 If initially sufficient decrease, then...
-                # if inner_iter == 0:
-                #     decr_alpha = not suff_decr
+                if inner_iter == 0:
+                    decr_alpha = not suff_decr
 
-                # if decr_alpha:
-                #     # 1.3 ...there is sufficient decrease.
-                #     if suff_decr:
-                #         W = Wnew
-                #         break
-                #     # 1.2 ...decrease alpha until...
-                #     else:
-                #         alpha *= self.nls_beta
+                if decr_alpha:
+                    # 1.3 ...there is sufficient decrease.
+                    if suff_decr:
+                        W = Wnew
+                        break
+                    # 1.2 ...decrease alpha until...
+                    else:
+                        alpha *= self.nls_beta
 
-                # # 2.3 ...there is not sufficient decrease.
-                # elif not suff_decr or (Wold == Wnew).all():
-                #     W = Wold
-                #     break
+                # 2.3 ...there is not sufficient decrease.
+                elif not suff_decr or (Wold == Wnew).all():
+                    W = Wold
+                    break
 
-                # # 2.2 ...increase alpha until...
-                # else:
-                #     alpha /= self.nls_beta
-                #     Wold = Wnew
+                # 2.2 ...increase alpha until...
+                else:
+                    alpha /= self.nls_beta
+                    Wold = Wnew
 
             # in_iter[n_iter] = inner_iter
 
@@ -631,34 +633,34 @@ class CovarianceDictionary(object):
                 if inner_iter == 0:
                     decr_alpha = not suff_decr
 
-                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.psdls_beta)
-                if (status == SUFF_DECR):
-                	D = Dnew
-                	break
-                elif (status == INSUFF_DECR):
-                	D = Dold
-                	break
-                else:
-                	alpha = status
-
-                # if decr_alpha:
-                #     # 1.3 ...there is sufficient decrease.
-                #     if suff_decr:
-                #         D = Dnew
-                #         break
-                #     # 1.2 ...decrease alpha until...
-                #     else:
-                #         alpha *= self.psdls_beta
-
-                # # 2.3 ...there is not sufficient decrease.
-                # elif not suff_decr or (Dold == Dnew).all():
-                #     D = Dold
-                #     break
-
-                # # 2.2 ...increase alpha until...
+                # status = self._adjust_step(decr_alpha, suff_decr, alpha, self.psdls_beta)
+                # if (status == SUFF_DECR):
+                # 	D = Dnew
+                # 	break
+                # elif (status == INSUFF_DECR):
+                # 	D = Dold
+                # 	break
                 # else:
-                #     alpha /= self.psdls_beta
-                #     Dold = Dnew
+                # 	alpha = status
+
+                if decr_alpha:
+                    # 1.3 ...there is sufficient decrease.
+                    if suff_decr:
+                        D = Dnew
+                        break
+                    # 1.2 ...decrease alpha until...
+                    else:
+                        alpha *= self.psdls_beta
+
+                # 2.3 ...there is not sufficient decrease.
+                elif not suff_decr or (Dold == Dnew).all():
+                    D = Dold
+                    break
+
+                # 2.2 ...increase alpha until...
+                else:
+                    alpha /= self.psdls_beta
+                    Dold = Dnew
 
             # in_iter[n_iter] = inner_iter
 
@@ -759,7 +761,7 @@ class CovarianceDictionary(object):
 
     def _pgm(self, X, Dinit, Winit):
 
-    	# Solves for covariance module and weights using
+    	# Solves for covariance modules and weights using
         # a projected gradient method.
 
         n_pair, n_mat = X.shape
@@ -825,9 +827,14 @@ class CovarianceDictionary(object):
             	# Proposed updates of dictionary and weights
             	# (gradient step and projection step)
                 # Gradient step.
+                # reg = 1.0 / (inner_iter + 1) # momentum-style regularization,
+                							   # see Combettes & Wajs (2005)
                 Wnew = W - alpha * gradW
+                # Wnew = W + reg * (Wnew * (Wnew > 0) - W)
                 Wnew *= Wnew > 0
                 Dnew = proj_col_psd(D - alpha * gradD, self.correlation)
+                # Dnew = D - alpha * gradD
+                # Dnew = D + reg * (proj_col_psd(Dnew, self.correlation) - D)
 
                 # Check for sufficient decrease.
                 obj_old = pow(obj * normX, 2)
@@ -839,52 +846,76 @@ class CovarianceDictionary(object):
                 if inner_iter == 0:
                     decr_alpha = not suff_decr
 
-                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.pgm_beta)
-                if (status == SUFF_DECR):
-                	W = Wnew
-                	D = Dnew
-                	break
-                elif (status == INSUFF_DECR):
-                	W = Wold
-                	D = Dold
-                	break
-                else:
-                	alpha = status
-
-                # if decr_alpha:
-                #     # 1.3 ...there is sufficient decrease.
-                #     if suff_decr:
-                #         W = Wnew
-                #         D = Dnew
-                #         break
-                #     # 1.2 ...decrease alpha until...
-                #     else:
-                #         alpha *= self.pgm_beta
-
-                # # 2.3 ...there is not sufficient decrease.
-                # elif not suff_decr or ((Wold == Wnew).all() and (Dold == Dnew).all()):
-                #     W = Wold
-                #     D = Dold
-                #     break
-
-                # # 2.2 ...increase alpha until...
+                # status = self._adjust_step(decr_alpha, suff_decr, alpha, self.pgm_beta)
+                # if (status == SUFF_DECR):
+                # 	W = Wnew
+                # 	D = Dnew
+                # 	break
+                # elif (status == INSUFF_DECR):
+                # 	W = Wold
+                # 	D = Dold
+                # 	break
                 # else:
-                #     alpha /= self.pgm_beta
-                #     Wold = Wnew
-                #     Dold = Dnew
+                # 	alpha = status
+
+                if decr_alpha:
+                    # 1.3 ...there is sufficient decrease.
+                    if suff_decr:
+                        W = Wnew
+                        D = Dnew
+                        break
+                    # 1.2 ...decrease alpha until...
+                    else:
+                        alpha *= self.pgm_beta
+
+                # 2.3 ...there is not sufficient decrease.
+                elif not suff_decr or ((Wold == Wnew).all() and (Dold == Dnew).all()):
+                    W = Wold
+                    D = Dold
+                    break
+
+                # 2.2 ...increase alpha until...
+                else:
+                    alpha /= self.pgm_beta
+                    Wold = Wnew
+                    Dold = Dnew
 
             gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
             gradW = dot(dot(D.T, D), W) - dot(D.T, X)
 
-        if self.verbose:
-            print 'Iter: %i. Final projected gradient norm %f. Final objective %f.' % (n_iter, pgn, obj)
-            sys.stdout.flush()
 
-        objective = objective[: n_iter + 1]
-        if self.time:
-            times = times[: n_iter + 1]
 
-        return D, W, objective, times
+    def _prox_loss(self, D, W, gamma):
+
+    	# Alternating least-squares to solve for the proximal 
+    	# operator of ||X - DW||_F^2.
+    	
+    	pass
+
+
+
+    def _dr(self, X, Dinit, Winit):
+
+    	# Douglas-Rachford, using alternating least-squares
+    	# to solve for the proximal operator of ||X - DW||_F^2.
+
+    	n_pair, n_mat = X.shape
+        n = npair2n(n_pair)
+        
+        D = Dinit
+        W = Winit
+        Dhalf = zeros(n_pair, self.k) # better initialization?
+        Whalf = zeros(self.k, n_mat)
+
+        dr_gamma = 0.5
+        reg = 0.5
+
+        for n_iter in range(self.max_iter):
+
+        	Dprox, Wprox = self._prox_loss(2 * D - Dhalf, 2 * W - Whalf, dr_gamma)
+
+        	Dhalf = Dhalf + reg * (Dprox - D)
+        	Whalf = Whalf + reg * (Wprox - W)
 
 
 
