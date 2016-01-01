@@ -3,3 +3,8 @@ demos/.ipynb_checkpoints/*
 demos/test.ipynb
 *.png
 *.eps
+
+*.aux
+*.log
+*.tex
+*.synctex.gz

@@ -1,5 +1,5 @@
 # covariance-dictionary
-`covdict` is a module for learning a dictionary of covariance matrices, inspired by prior algorithms like [this one] (http://www.cs.technion.ac.il/~elad/publications/journals/2004/32_KSVD_IEEE_TSP.pdf) for dictionary learning for sparse image representation. The covariance dictionary can then be used to uncover the evolving covariance structure, or "network structure", of a time series (see the [manuscript draft](http://www.stanford.edu/~clarafj/fannjiang_covdict_draft.pdf) for more details). Check out [this IPython notebook](http://github.com/clarafj/covariance-dictionary/blob/master/demos/zebra_demo.ipynb) for a demo on neural developmental data.
+`covdict` is a module for learning a dictionary of covariance matrices, inspired by prior algorithms like [this one] (http://www.cs.technion.ac.il/~elad/publications/journals/2004/32_KSVD_IEEE_TSP.pdf) for dictionary learning for sparse image representation. The covariance dictionary can then be used to uncover the evolving covariance structure, or "network structure", of a time series (see the [manuscript draft](http://github.com/clarafj/covariance-dictionary/blob/master/manuscript.pdf) for more details). Check out [this IPython notebook](http://github.com/clarafj/covariance-dictionary/blob/master/demos/zebra_demo.ipynb) for a demo on neural developmental data.
 
 ## Optimization problem
 
@@ -28,11 +28,13 @@ The basic idea is to find a dictionary _D_ and weights _W_ that minimize the err
 
 ## Algorithms
 
-We support three algorithms for solving the problem, described below. In practice ADMM appears to converge more consistently across different problem types and sizes.
+We support four algorithms for solving the problem, described below. In practice ADMM appears to converge more consistently across different problem types and sizes.
 
 #### Alternating Directions Method of Multipliers (ADMM)
 
 #### Projected Gradient Method (PGM)
+
+#### Douglas-Rachford (DR)
 
 #### Alternating Least-Squares (ALS)
 
