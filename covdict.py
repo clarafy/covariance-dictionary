@@ -288,8 +288,8 @@ class CovarianceDictionary(object):
 
     """
 
-    # SUFF_DECR = -1
-    # INSUFF_DECR = -2
+    SUFF_DECR = -1
+    INSUFF_DECR = -2
 
     def __init__(self, k=2, method='admm', init='kmeans', max_iter=None, tol=None, 
         verbose=False, obj_tol=None, time=False, 
@@ -469,21 +469,20 @@ class CovarianceDictionary(object):
         return D, W, objective, times
 
 
-    # TODO: define global enum (?) for SUFF_DECR, INSUFF_DECR
     def _adjust_step(self, decr_alpha, suff_decr, alpha, beta):
 
     	# 1(a) If initially not sufficient decrease...
         if decr_alpha:
 	        # 1(c) ...there is sufficient decrease.
 	    	if suff_decr:
-	            return SUFF_DECR
+	            return CovarianceDictionary.SUFF_DECR
 	        # 1(b) ...decrease alpha until...
 	        else:
 	            return alpha * beta
 
 	    # 2(b) ...there is not sufficient decrease.
         elif not suff_decr: # or (Wold == Wnew).all():
-	        return INSUFF_DECR
+	        return CovarianceDictionary.INSUFF_DECR
 
 	    # 2(a) If initially sufficient decrease, increase alpha until...
         else:
@@ -539,39 +538,16 @@ class CovarianceDictionary(object):
                 if inner_iter == 0:
                 	decr_alpha = not suff_decr
 
-                # status = self._adjust_step(decr_alpha, suff_decr, alpha, self.nls_beta)
-                # if (status == SUFF_DECR):
-                # 	W = Wnew
-                # 	break
-                # elif (status == INSUFF_DECR):
-                # 	W = Wold
-                # 	break
-                # else:
-                # 	alpha = status
-
-                # 1.1 If initially not sufficient decrease, then...
-                # 2.1 If initially sufficient decrease, then...
-                if inner_iter == 0:
-                    decr_alpha = not suff_decr
-
-                if decr_alpha:
-                    # 1.3 ...there is sufficient decrease.
-                    if suff_decr:
-                        W = Wnew
-                        break
-                    # 1.2 ...decrease alpha until...
-                    else:
-                        alpha *= self.nls_beta
-
-                # 2.3 ...there is not sufficient decrease.
-                elif not suff_decr or (Wold == Wnew).all():
-                    W = Wold
-                    break
-
-                # 2.2 ...increase alpha until...
+                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.nls_beta)
+                if (status == CovarianceDictionary.SUFF_DECR):
+                	W = Wnew
+                	break
+                elif (status == CovarianceDictionary.INSUFF_DECR):
+                	W = Wold
+                	break
                 else:
-                    alpha /= self.nls_beta
-                    Wold = Wnew
+                	alpha = status
+                	Wold = Wnew
 
             # in_iter[n_iter] = inner_iter
 
@@ -633,34 +609,16 @@ class CovarianceDictionary(object):
                 if inner_iter == 0:
                     decr_alpha = not suff_decr
 
-                # status = self._adjust_step(decr_alpha, suff_decr, alpha, self.psdls_beta)
-                # if (status == SUFF_DECR):
-                # 	D = Dnew
-                # 	break
-                # elif (status == INSUFF_DECR):
-                # 	D = Dold
-                # 	break
-                # else:
-                # 	alpha = status
-
-                if decr_alpha:
-                    # 1.3 ...there is sufficient decrease.
-                    if suff_decr:
-                        D = Dnew
-                        break
-                    # 1.2 ...decrease alpha until...
-                    else:
-                        alpha *= self.psdls_beta
-
-                # 2.3 ...there is not sufficient decrease.
-                elif not suff_decr or (Dold == Dnew).all():
-                    D = Dold
-                    break
-
-                # 2.2 ...increase alpha until...
+                status = self._adjust_step(decr_alpha, suff_decr, alpha, self.psdls_beta)
+                if (status == CovarianceDictionary.SUFF_DECR):
+                	D = Dnew
+                	break
+                elif (status == CovarianceDictionary.INSUFF_DECR):
+                	D = Dold
+                	break
                 else:
-                    alpha /= self.psdls_beta
-                    Dold = Dnew
+                	alpha = status
+                	Dold = Dnew
 
             # in_iter[n_iter] = inner_iter
 
@@ -847,16 +805,18 @@ class CovarianceDictionary(object):
                     decr_alpha = not suff_decr
 
                 # status = self._adjust_step(decr_alpha, suff_decr, alpha, self.pgm_beta)
-                # if (status == SUFF_DECR):
+                # if (status == CovarianceDictionary.SUFF_DECR):
                 # 	W = Wnew
                 # 	D = Dnew
                 # 	break
-                # elif (status == INSUFF_DECR):
+                # elif (status == CovarianceDictionary.INSUFF_DECR):
                 # 	W = Wold
                 # 	D = Dold
                 # 	break
                 # else:
                 # 	alpha = status
+                # 	W = Wold
+                # 	D = Dold
 
                 if decr_alpha:
                     # 1.3 ...there is sufficient decrease.
@@ -883,13 +843,22 @@ class CovarianceDictionary(object):
             gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
             gradW = dot(dot(D.T, D), W) - dot(D.T, X)
 
+        if self.verbose:
+            print 'Iter: %i. Final projected gradient norm %f. Final objective %f.' % (n_iter, pgn, obj)
+            sys.stdout.flush()
+
+        objective = objective[: n_iter + 1]
+        if self.time:
+            times = times[: n_iter + 1]
+
+        return D, W, objective, times
+
 
 
     def _prox_loss(self, D, W, gamma):
 
     	# Alternating least-squares to solve for the proximal 
     	# operator of ||X - DW||_F^2.
-    	
     	pass
 
 
