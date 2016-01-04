@@ -468,7 +468,7 @@ class CovarianceDictionary(object):
 
         return D, W, objective, times
 
-
+	# "Warm-start" trick in Lin & More (1999) for searching step size.
     def _adjust_step(self, decr_alpha, suff_decr, alpha, beta):
 
     	# 1(a) If initially not sufficient decrease...
@@ -778,8 +778,7 @@ class CovarianceDictionary(object):
             Dold = D
 
             # Search for step size that produces sufficient decrease
-            # ("Armijo rule along the projection arc" in Bertsekas (1999)), using
-            # "warm-start" trick in Lin & More (1999).
+            # ("Armijo rule along the projection arc" in Bertsekas (1999)).
             for inner_iter in range(20):
 
             	# Proposed updates of dictionary and weights
