@@ -468,7 +468,7 @@ class CovarianceDictionary(object):
 
         return D, W, objective, times
 
-	# "Warm-start" trick in Lin & More (1999) for searching step size.
+    # "Warm-start" trick in Lin & More (1999) for searching step size.
     def _adjust_step(self, decr_alpha, suff_decr, alpha, beta):
 
     	# 1(a) If initially not sufficient decrease...
@@ -479,7 +479,7 @@ class CovarianceDictionary(object):
 	        # 1(b) ...decrease alpha until...
 	        else:
 	            return alpha * beta
-
+	            
 	    # 2(b) ...there is not sufficient decrease.
         elif not suff_decr: # or (Wold == Wnew).all():
 	        return CovarianceDictionary.INSUFF_DECR
