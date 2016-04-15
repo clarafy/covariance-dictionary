@@ -5,11 +5,12 @@ Class and functions for learning dictionary of covariances matrices
 import warnings
 import sys
 import time
+from itertools import combinations
 from numpy import (arange, cov, diag, diag_indices, dot, dsplit, dstack, empty, finfo, fmax, 
-    hstack, identity, logical_or, max, mod, sqrt, where, triu_indices, vstack, zeros)
+    hstack, identity, logical_or, max, mod, sort, sqrt, where, triu_indices, vstack, zeros)
 from numpy.random import rand
-from scipy.linalg import eigh, inv, norm
-
+from scipy.misc import factorial
+from scipy.linalg import eigh, inv, norm, qr, solve
 
 
 def plot_element(element, coords, thresh=0.5, size=200, colors=None):
@@ -42,6 +43,17 @@ def plot_element(element, coords, thresh=0.5, size=200, colors=None):
 
 
 
+def norm_concat(x1, x2):
+
+    # Fastest way to compute the norm of two concatenated vectors,
+    # compared to:
+    # np.linalg.norm(np.vstack((x1, x2)))
+    # np.sqrt(np.sum(np.power(x1, 2)) + np.sum(np.power(x2, 2)))
+
+    return sqrt(pow(norm(x1), 2) + pow(norm(x2), 2))
+
+
+
 def pack(vec, n=None, half=False):
 
     # Reforms a vector into the upper triangle
@@ -56,7 +68,7 @@ def pack(vec, n=None, half=False):
     if not half:
         symm = packed + packed.T
         symm[diag_indices(n)] = packed[diag_indices(n)]
-        packed = symm
+        return symm
 
     return packed
 
@@ -182,8 +194,41 @@ def proj_col_psd(A, correlation=False):
 def npair2n(n_pair):
 
     # Number of nodes from number of upper triangular entries.
-
     return int((sqrt(1 + 8 * n_pair) - 1) / 2)
+
+
+def generate_psd(n):
+
+    # Generates a random positive semidefinite matrix
+    # A = UDU^T, where U is a Haar-distributed random
+    # orthogonal matrix and D is a diagonal matrix
+    # of uniformly distributed positive entries in [0, 1].
+    # (See http://epubs.siam.org/doi/pdf/10.1137/0717034.)
+    
+    # QR decomposition of random basis tol get orthogonal matrix
+    Q, _ = qr(randn(n, n))
+    return dot(dot(Q, diag(rand(n))), Q.T)
+
+
+
+def eval_error(D, W, Dest, West):
+
+    # Evaluates the error between the true D and the estimated
+    # Dest searching across all possible permutations of atoms.
+    # normDW = norm_concat(D, W)
+
+    normD = norm(D)
+    k = D.shape[1]
+
+    errors = empty(factorial(k))
+    for i, perm in enumerate(permutations(range(k))):
+        D_perm = D[:, list(perm)]
+        Dest_perm = Dest[:, list(perm)]
+        scale = diag(dot(D_perm.T, Dest_perm) / dot(D_perm.T, D_perm))[None, :]
+        errors[i] = norm(D_perm - scale * Dest_perm) / normD
+        # errors[i] = norm(D[:, list(perm)] - Dest[:, list(perm)], \
+        #                         W[:, list(perm)] - West[:, list(perm)]) / normDW
+    return min(errors)
 
 
 
@@ -296,10 +341,10 @@ class CovarianceDictionary(object):
         nls_beta=0.2, psdls_beta=0.2, nls_max_iter=2000, psdls_max_iter=2000,
         pgm_beta=0.5, correlation=False, admm_gamma=1, admm_alpha=47.75):
 
-        if method not in ('als', 'admm', 'pgm'):
+        if method not in ('als', 'admm', 'pgm', 'dr'):
             raise ValueError(
                                 'Invalid method: got %r instead of one of %r' %
-                                (method, ('als', 'admm', 'pgm')))
+                                (method, ('als', 'admm', 'pgm', 'dr')))
         self.method = method
 
         if init not in ('kmeans', 'rand'):
@@ -315,6 +360,8 @@ class CovarianceDictionary(object):
                 self.max_iter = 6000
             elif self.method == 'pgm':
             	self.max_iter = 600
+            elif self.method == 'dr':
+                self.max_iter = 200
         else:
             self.max_iter = max_iter
 
@@ -335,6 +382,7 @@ class CovarianceDictionary(object):
         self.verbose = verbose
         self.obj_tol = obj_tol
         self.time = time
+        self.times = None
         self.dictionary = None
         self.objective = None
 
@@ -646,7 +694,7 @@ class CovarianceDictionary(object):
         # Initial gradient.
         gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
         gradW = dot(dot(D.T, D), W) - dot(D.T, X)
-        init_grad_norm = norm(vstack((gradD, gradW.T)))
+        init_grad_norm = norm_concat(gradD, gradW.T)
         
         if self.verbose:
             print "Initial gradient norm: %f." % init_grad_norm
@@ -672,7 +720,7 @@ class CovarianceDictionary(object):
             # (stationary point iff projected gradient norm = 0).
             pgradW = gradW * logical_or(gradW < 0, W > 0)
             pgradD = proj_col_psd(D - gradD, self.correlation) - D
-            pgn = norm(vstack((pgradD, pgradW.T)))
+            pgn = norm_concat(pgradD, pgradW)
             # pg_norm[n_iter] = pgn
 
             # Record objective.
@@ -731,7 +779,7 @@ class CovarianceDictionary(object):
         # Initial gradient.
         gradD = dot(D, dot(W, W.T)) - dot(X, W.T)
         gradW = dot(dot(D.T, D), W) - dot(D.T, X)
-        init_grad_norm = norm(vstack((gradD, gradW.T)))
+        init_grad_norm = norm_concat(gradD, gradW.T)
         
         if self.verbose:
             print "Initial gradient norm: %f." % init_grad_norm
@@ -753,7 +801,7 @@ class CovarianceDictionary(object):
             # Compute projected gradient for stopping condition. 
             pgradW = gradW * logical_or(gradW < 0, W > 0)
             pgradD = proj_col_psd(D - gradD, self.correlation) - D
-            pgn = norm(vstack((pgradD, pgradW.T)))
+            pgn = norm_concat(pgradD, pgradW)
 
             # Record objective.
             obj = norm(X - dot(D, W)) / normX
@@ -854,11 +902,29 @@ class CovarianceDictionary(object):
 
 
 
-    def _prox_loss(self, D, W, gamma):
+    def _prox_loss(self, D, W, X, gamma):
 
     	# Alternating least-squares to solve for the proximal 
     	# operator of ||X - DW||_F^2.
-    	pass
+
+        # Equivalent to initializing Y = Z = 0.
+        n_pair = X.shape[0]
+        Y = D
+        Z = W
+
+        for n_iter in range(20):
+
+            Yold = Y 
+            Zold = Z
+
+            Y = solve(gamma * dot(Zold, Zold.T) + identity(self.k), gamma * dot(Zold, X.T) + D.T).T
+            Z = solve(gamma * dot(Y.T, Y) + identity(self.k), gamma * dot(Y.T, X) + W)
+
+            norm_diff = norm_concat(Y - Yold, Z - Zold) # relative to norm_concat(Y, Z)?
+            if norm_diff < self.tol:
+                break
+
+        return Y, Z
 
 
 
@@ -866,24 +932,68 @@ class CovarianceDictionary(object):
 
     	# Douglas-Rachford, using alternating least-squares
     	# to solve for the proximal operator of ||X - DW||_F^2.
+        # Seems to get stuck suboptimally...
 
-    	n_pair, n_mat = X.shape
+        n_pair, n_mat = X.shape
         n = npair2n(n_pair)
         
         D = Dinit
         W = Winit
-        Dhalf = zeros(n_pair, self.k) # better initialization?
-        Whalf = zeros(self.k, n_mat)
+        Dhalf = zeros((n_pair, self.k)) # better initialization?
+        Whalf = zeros((self.k, n_mat))
 
-        dr_gamma = 0.5
-        reg = 0.5
+        dr_gamma = 5.0
+        epsilon = 0.2
+
+        normX = norm(X)
+        objective = empty(self.max_iter)
+
+        if self.time:
+            times = empty(self.max_iter)
+            t = time.time()
+        else:
+            times = None
 
         for n_iter in range(self.max_iter):
 
-        	Dprox, Wprox = self._prox_loss(2 * D - Dhalf, 2 * W - Whalf, dr_gamma)
+            # Update using proximal operator.
+            Dprox, Wprox = self._prox_loss(2 * D - Dhalf, 2 * W - Whalf, X, dr_gamma)
+            reg = max([(2 - epsilon) / (n_iter + 1), epsilon])
+            Dhalf = Dhalf + reg * (Dprox - D)
+            Whalf = Whalf + reg * (Wprox - W)
 
-        	Dhalf = Dhalf + reg * (Dprox - D)
-        	Whalf = Whalf + reg * (Wprox - W)
+            # Make feasible.
+            Dold = D
+            Wold = W
+            D = proj_col_psd(Dhalf, self.correlation)
+            W *= Whalf > 0
+
+            if self.time:
+                times[n_iter] = time.time() - t
+
+            # Record objective.
+            obj = norm(X - dot(D, W)) / normX
+            objective[n_iter] = obj
+
+            # relative to norm_concat(D, W)?
+            norm_diff = norm_concat(D - Dold, W - Wold) 
+
+            # Check for convergence.
+            if self.obj_tol is None:
+                if norm_diff < self.tol:
+                    break
+            else:
+                if obj < self.obj_tol:
+                    break
+
+            if self.verbose:
+                print 'Iter: %i. Norm of iterate difference: %f. Objective: %f.' % (n_iter, norm_diff, obj)
+                sys.stdout.flush()
+
+        objective = objective[: n_iter + 1]
+        if self.time:
+            times = times[: n_iter + 1]
+        return D, W, objective, times
 
 
 
@@ -913,6 +1023,8 @@ class CovarianceDictionary(object):
             D, W, obj, times = self._admm(X, Dinit, Winit)
         elif self.method == 'pgm':
             D, W, obj, times = self._pgm(X, Dinit, Winit)
+        elif self.method == 'dr':
+            D, W, obj, times = self._dr(X, Dinit, Winit)
 
         self.dictionary = pack_samples(D)
         self.D = D
