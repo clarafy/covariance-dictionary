@@ -5,10 +5,11 @@ Class and functions for learning dictionary of covariances matrices
 import warnings
 import sys
 import time
-from itertools import combinations
+from itertools import permutations
 from numpy import (arange, cov, diag, diag_indices, dot, dsplit, dstack, empty, finfo, fmax, 
-    hstack, identity, logical_or, max, mod, sort, sqrt, where, triu_indices, vstack, zeros)
-from numpy.random import rand
+    hstack, identity, logical_or, max, mean, mod, sort, sqrt, where, triu_indices, vstack, zeros)
+from numpy import sum as npsum
+from numpy.random import rand, randint, randn
 from scipy.misc import factorial
 from scipy.linalg import eigh, inv, norm, qr, solve
 
@@ -197,38 +198,69 @@ def npair2n(n_pair):
     return int((sqrt(1 + 8 * n_pair) - 1) / 2)
 
 
-def generate_psd(n):
+def generate_psd(n, is_singular=False):
 
     # Generates a random positive semidefinite matrix
     # A = UDU^T, where U is a Haar-distributed random
     # orthogonal matrix and D is a diagonal matrix
     # of uniformly distributed positive entries in [0, 1].
     # (See http://epubs.siam.org/doi/pdf/10.1137/0717034.)
+    # Distribution over faces (singular PSD) correct?
     
-    # QR decomposition of random basis tol get orthogonal matrix
-    Q, _ = qr(randn(n, n))
-    return dot(dot(Q, diag(rand(n))), Q.T)
+    # QR decomposition of random basis to get orthogonal matrix
+    Q = zeros((n, n))
+    while not Q.any() or Q.shape[1] < n:
+        Q, _ = qr(randn(n, n), mode='reduced')
+
+    if not is_singular:
+        sing_vals = rand(n)
+    else:
+        nnz = randint(n)
+        sing_vals = hstack((rand(nnz), zeros(n - nnz)))
+    return dot(dot(Q, diag(sing_vals)), Q.T)
+
+def generate_data(n, k, N, is_unpacked=True, is_singular=False):
+
+    # Generates a dictionary of random positive semidefinite matrices
+    # and non-negative weights. Default to unpacked since probably
+    # going to run fit_transform() and unpack_samples().
+
+    D_unpacked = vstack([generate_psd(n, is_singular)[triu_indices(n)] for _ in range(k)]).T
+    W = rand(k, N)
+    X = dot(D_unpacked, W)
+    if not is_unpacked:
+        X = pack_samples(X)
+    return X, pack_samples(D_unpacked), W
 
 
+def eval_necessary(D):
 
-def eval_error(D, W, Dest, West):
+    # Checks necessary conditions for factorization uniqueness.
+    pass
 
-    # Evaluates the error between the true D and the estimated
+
+def norm_colwise(A):
+    return sqrt(npsum(A ** 2, 0))
+
+
+def eval_similarity(D, Dest):
+
+    # Evaluates the cosine similarity between the true D and the estimated
     # Dest searching across all possible permutations of atoms.
     # normDW = norm_concat(D, W)
+    # Technically, we can solve for the scaling constants that minimize
+    # the combined error of D_i - c * Dest_i, W_i - (1 / c) * West_i...
 
-    normD = norm(D)
-    k = D.shape[1]
+    k = D.shape[2]
+    D = unpack_samples(D)
+    Dest = unpack_samples(Dest)
+    D_norm_colwise = norm_colwise(D)
+    similarities = empty(factorial(k))
 
-    errors = empty(factorial(k))
     for i, perm in enumerate(permutations(range(k))):
-        D_perm = D[:, list(perm)]
         Dest_perm = Dest[:, list(perm)]
-        scale = diag(dot(D_perm.T, Dest_perm) / dot(D_perm.T, D_perm))[None, :]
-        errors[i] = norm(D_perm - scale * Dest_perm) / normD
-        # errors[i] = norm(D[:, list(perm)] - Dest[:, list(perm)], \
-        #                         W[:, list(perm)] - West[:, list(perm)]) / normDW
-    return min(errors)
+        similarities[i] = mean(diag(dot(D.T, Dest_perm)) / (D_norm_colwise * norm_colwise(Dest_perm)))
+    return max(similarities)
 
 
 
@@ -291,7 +323,7 @@ class CovarianceDictionary(object):
         than covariance matrices. Supported for all algorithms,
         but takes long as chickens for ALS so only use ADMM or PGM
 
-    admm_gamma : float, optional, default = 1
+    admm_gamma : float, optional, default = 0.1
         Constant on step size rule for ADMM 
 
     admm_alpha : float, optional, default = 47.75
@@ -339,7 +371,7 @@ class CovarianceDictionary(object):
     def __init__(self, k=2, method='admm', init='kmeans', max_iter=None, tol=None, 
         verbose=False, obj_tol=None, time=False, 
         nls_beta=0.2, psdls_beta=0.2, nls_max_iter=2000, psdls_max_iter=2000,
-        pgm_beta=0.5, correlation=False, admm_gamma=1, admm_alpha=47.75):
+        pgm_beta=0.5, correlation=False, admm_gamma=0.1, admm_alpha=47.75):
 
         if method not in ('als', 'admm', 'pgm', 'dr'):
             raise ValueError(
@@ -997,7 +1029,7 @@ class CovarianceDictionary(object):
 
 
 
-    def fit_transform(self, X):
+    def fit_transform(self, X, is_unpacked=False):
             
         """Learns a dictionary from data X and returns dictionary weights
 
@@ -1014,7 +1046,8 @@ class CovarianceDictionary(object):
 
         """
 
-        X = unpack_samples(X) # unpack into (n_pair, n_samp) array
+        if not is_unpacked:
+            X = unpack_samples(X) # unpack into (n_pair, n_samp) array
         Dinit, Winit = self._initialize(X)
 
         if self.method == 'als':
