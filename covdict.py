@@ -14,32 +14,53 @@ from scipy.misc import factorial
 from scipy.linalg import eigh, inv, norm, qr, solve
 
 
-def plot_element(element, coords, thresh=0.5, size=200, colors=None):
+def plot_element(element, coords, thresh=0.5, size=200, colors=None, diameter_scale=5,
+    y_range=None, x_range=None, rand_order=False):
 
     # TODO: If covariance and not correlation element, need to normalize
     # line widths (commented out below).
 
-    from numpy import array, percentile
+    from numpy import array, ones, percentile
+    from numpy.random import permutation
     import matplotlib.pyplot as plt
 
     n = element.shape[0]
     if colors is None:
         colors = 'DarkGray'
 
+    # Positively correlated edges.
     edges_pos = where(element > percentile(element[element > 0], 100 * thresh))
     # alpha_pos = element[edges_pos] / max(element[element > 0])
-    width_pos = element[edges_pos] * 5
-    edges_neg = where(-element > percentile(-element[element < 0], 100 * thresh))
-    # alpha_neg = -element[edges_neg] / max(-element[element < 0])
-    width_neg = -element[edges_neg] * 5
+    width_pos = element[edges_pos] * diameter_scale
+    # Negatively correlated edges.
+    if (element < 0).any():
+        edges_neg = where(-element > percentile(-element[element < 0], 100 * thresh))
+        # alpha_neg = -element[edges_neg] / max(-element[element < 0])
+        width_neg = -element[edges_neg] * diameter_scale
 
-    for i, edge in enumerate(array(edges_pos).T):
-        plt.plot(coords[edge, 0], coords[edge, 1], 'YellowGreen', linewidth=width_pos[i]);
+    edges = hstack((edges_pos, edges_neg))
+    width = hstack((width_pos, width_neg))
+    is_neg = hstack((zeros(width_pos.size), ones(width_neg.size)))
 
-    for i, edge in enumerate(array(edges_neg).T):
-        plt.plot(coords[edge, 0], coords[edge, 1], 'PaleVioletRed', linewidth=width_neg[i]);
+    if rand_order:
+        perm = permutation(width.size)
+        edges = edges[:, perm]
+        width = width[perm]
+        is_neg = is_neg[perm]
+
+    for i, edge in enumerate(array(edges).T):
+        if is_neg[i]:
+            plt.plot(coords[edge, 0], coords[edge, 1], 'PaleVioletRed', linewidth=width[i]);
+        else:
+            plt.plot(coords[edge, 0], coords[edge, 1], 'YellowGreen', linewidth=width[i]);
 
     plt.scatter(coords[:, 0], coords[:, 1], s=size, linewidth=0, c=colors);
+    if y_range is None or x_range is None:
+        plt.axis('scaled')
+    else:
+        plt.axis('scaled')
+        plt.ylim(y_range)
+        plt.xlim(x_range)
     plt.axis('off')
 
 
@@ -96,6 +117,35 @@ def unpack_samples(packed):
     return vstack([mat[triu_indices(n)] for mat in packed.T]).T
 
 
+def proj_weights(W, correlation=False):
+
+    # From Chen, Y. & Ye, X. (2011). Projection onto a simplex.
+
+    if correlation:
+
+        k, n = W.shape
+        W_proj = empty((k, n))
+
+        for col_idx in range(n):
+            w = sort(W[:, col_idx])
+            idx = k - 2
+
+            while(True):
+                t_idx = (sum(w[idx + 1 :]) - 1) / (k - idx - 1)
+                if t_idx >= w[idx]:
+                    W_proj[:, col_idx] = fmax(W[:, col_idx] - t_idx, 0)
+                    break
+                else:
+                    idx = idx - 1
+                    if idx < 0:
+                        t_idx = (sum(w) - 1) / k
+                        W_proj[:, col_idx] = fmax(W[:, col_idx] - t_idx, 0)
+                        break
+        return W_proj
+    else:
+        return fmax(W, 0)
+
+
 
 def proj_psd(A):
 
@@ -108,6 +158,8 @@ def proj_psd(A):
     Aproj = dot(dot(U, diag(d)), U.T)
 
     return Aproj
+
+
 
 def proj_corr(A, max_iter=100, tol=1e-6):
 
@@ -144,10 +196,8 @@ def proj_corr(A, max_iter=100, tol=1e-6):
         deltaS = X - R
         Y = X
 
-        # Equality and bound constraints. 
+        # Equality constraints. 
         Y[diag_idx] = 1
-        Y[Y > 1] = 1
-        Y[Y < -1] = -1
 
         diffX = max(abs(X - Xprev)) / max(abs(X))
         diffY = max(abs(Y - Yprev)) / max(abs(Y))
@@ -531,7 +581,7 @@ class CovarianceDictionary(object):
             V = dot(inv(dot(U.T, U) + beta * identity(self.k)), dot(U.T, X) + beta * W - Pi)
 
             D = proj_col_psd(U + Lambda / alpha, self.correlation)
-            W = fmax(V + Pi / beta, 0)
+            W = proj_weights(V + Pi / beta, self.correlation)
 
             # Dual variable updates
             Lambda = Lambda + self.admm_gamma * alpha * (U - D)
@@ -592,7 +642,10 @@ class CovarianceDictionary(object):
             # Stopping condition on projected gradient norm.
             # Multiplication with a boolean array is more than twice
             # as fast as indexing into grad.
-            pgn = norm(grad * logical_or(grad < 0, W > 0))
+
+            # Correct modification for simplex projection?
+            pgn = norm(proj_weights(W - grad, self.correlation) - W)
+            # pgn = norm(grad * logical_or(grad < 0, W > 0))
             pg_norm[n_iter] = pgn
 
             if pgn < tol:
@@ -607,7 +660,8 @@ class CovarianceDictionary(object):
 
                 # Gradient and projection step.
                 Wnew = W - alpha * grad
-                Wnew *= Wnew > 0
+                # Wnew *= Wnew > 0
+                Wnew = proj_weights(Wnew, self.correlation)
 
                 # Check Lin (2007) Eq. (16) condition.
                 d = Wnew - W
