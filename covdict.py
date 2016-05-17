@@ -15,7 +15,7 @@ from scipy.linalg import eigh, inv, norm, qr, solve
 
 
 def plot_element(element, coords, thresh=0.5, size=200, colors=None, diameter_scale=5,
-    y_range=None, x_range=None, rand_order=False):
+    neg_color='PaleVioletRed', pos_color='YellowGreen', y_range=None, x_range=None, rand_order=False):
 
     # TODO: If covariance and not correlation element, need to normalize
     # line widths (commented out below).
@@ -50,9 +50,9 @@ def plot_element(element, coords, thresh=0.5, size=200, colors=None, diameter_sc
 
     for i, edge in enumerate(array(edges).T):
         if is_neg[i]:
-            plt.plot(coords[edge, 0], coords[edge, 1], 'PaleVioletRed', linewidth=width[i]);
+            plt.plot(coords[edge, 0], coords[edge, 1], neg_color, linewidth=width[i]);
         else:
-            plt.plot(coords[edge, 0], coords[edge, 1], 'YellowGreen', linewidth=width[i]);
+            plt.plot(coords[edge, 0], coords[edge, 1], pos_color, linewidth=width[i]);
 
     plt.scatter(coords[:, 0], coords[:, 1], s=size, linewidth=0, c=colors);
     if y_range is None or x_range is None:
