@@ -260,7 +260,7 @@ def generate_psd(n, is_singular=False):
     # QR decomposition of random basis to get orthogonal matrix
     Q = zeros((n, n))
     while not Q.any() or Q.shape[1] < n:
-        Q, _ = qr(randn(n, n), mode='reduced')
+        Q, _ = qr(randn(n, n)) # mode='reduced'
 
     if not is_singular:
         sing_vals = rand(n)
@@ -441,7 +441,7 @@ class CovarianceDictionary(object):
             elif self.method == 'admm':
                 self.max_iter = 6000
             elif self.method == 'pgm':
-            	self.max_iter = 600
+            	self.max_iter = 10000
             elif self.method == 'dr':
                 self.max_iter = 200
         else:
@@ -979,6 +979,9 @@ class CovarianceDictionary(object):
         if self.verbose:
             print 'Iter: %i. Final projected gradient norm %f. Final objective %f.' % (n_iter, pgn, obj)
             sys.stdout.flush()
+
+        if n_iter == self.max_iter - 1:
+            warnings.warn("Max iterations reached in PSDLS subproblem.")
 
         objective = objective[: n_iter + 1]
         if self.time:
